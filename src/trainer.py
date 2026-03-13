@@ -83,11 +83,16 @@ class Trainer:
         Performs num_iters iterations with num_eps episodes of self-play in each
         iteration. After every iteration, it trains the network.
         """
+        from collections import deque
+        
         num_workers = self.args.get('num_workers', os.cpu_count())
+        replay_buffer_iters = self.args.get('replay_buffer_iters', 5)
+        # Sliding window of training examples from recent iterations
+        replay_buffer = deque(maxlen=replay_buffer_iters)
         
         for i in range(start_iter, self.args['num_iters'] + 1):
             print(f'------ITER {i}------')
-            train_examples = []
+            iter_examples = []
             
             self.model.eval()
             model_state_dict = {k: v.cpu() for k, v in self.model.state_dict().items()}
@@ -98,11 +103,18 @@ class Trainer:
             with mp.Pool(processes=num_workers) as pool:
                 pbar = tqdm(total=episodes_to_run, desc="Self Play (Pool)")
                 for episode_data in pool.imap_unordered(_self_play_worker, worker_args):
-                    train_examples.extend(episode_data)
+                    iter_examples.extend(episode_data)
                     pbar.update(1)
                 pbar.close()
             
-            # Standard training phase
+            # Add this iteration's data to the replay buffer
+            replay_buffer.append(iter_examples)
+            
+            # Train on all examples in the replay buffer
+            train_examples = []
+            for examples in replay_buffer:
+                train_examples.extend(examples)
+            print(f'Training on {len(train_examples)} examples from {len(replay_buffer)} iteration(s)')
             np.random.shuffle(train_examples)
             self.train(train_examples)
             
