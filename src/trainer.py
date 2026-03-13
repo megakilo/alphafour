@@ -153,6 +153,7 @@ class Trainer:
             os.makedirs(folder)
         torch.save({
             'state_dict': self.model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
         }, filepath)
 
     def load_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar'):
@@ -161,3 +162,5 @@ class Trainer:
             raise FileNotFoundError(f"No checkpoint found at {filepath}")
         checkpoint = torch.load(filepath, map_location=self.model.device)
         self.model.load_state_dict(checkpoint['state_dict'])
+        if 'optimizer' in checkpoint:
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
