@@ -109,7 +109,6 @@ class Trainer:
         """
         Trains the neural network using the examples from self-play.
         """
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.args['lr'])
         batch_size = self.args['batch_size']
         
         for epoch in range(self.args['epochs']):
