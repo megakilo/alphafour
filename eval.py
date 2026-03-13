@@ -137,8 +137,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluate two AlphaZero checkpoints.')
     parser.add_argument('--cp1', type=str, required=True, help='Path to first checkpoint')
     parser.add_argument('--cp2', type=str, required=True, help='Path to second checkpoint')
-    parser.add_argument('--games', type=int, default=200, help='Number of games to play (default: 200)')
-    parser.add_argument('--sims', type=int, default=50, help='MCTS simulations per move')
+    parser.add_argument('--games', type=int, default=20, help='Number of games to play (should be even)')
+    parser.add_argument('--sims', type=int, default=1000, help='MCTS simulations per move')
     parser.add_argument('--workers', type=int, default=None, help='Number of parallel workers (default: cpu_count)')
     
     args = parser.parse_args()
