@@ -1,0 +1,95 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ResBlock(nn.Module):
+    def __init__(self, num_hidden):
+        super().__init__()
+        self.conv1 = nn.Conv2d(num_hidden, num_hidden, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(num_hidden)
+        self.conv2 = nn.Conv2d(num_hidden, num_hidden, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(num_hidden)
+
+    def forward(self, x):
+        residual = x
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = self.bn2(self.conv2(x))
+        x += residual
+        x = F.relu(x)
+        return x
+
+class AlphaZeroNet(nn.Module):
+    def __init__(self, game, num_resBlocks=5, num_hidden=128):
+        super().__init__()
+        self.action_size = game.action_size
+        if torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+        
+        self.startBlock = nn.Sequential(
+            nn.Conv2d(1, num_hidden, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_hidden),
+            nn.ReLU()
+        )
+        
+        self.backBone = nn.ModuleList(
+            [ResBlock(num_hidden) for i in range(num_resBlocks)]
+        )
+        
+        self.policyHead = nn.Sequential(
+            nn.Conv2d(num_hidden, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(32 * game.rows * game.cols, self.action_size)
+        )
+        
+        self.valueHead = nn.Sequential(
+            nn.Conv2d(num_hidden, 3, kernel_size=3, padding=1),
+            nn.BatchNorm2d(3),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(3 * game.rows * game.cols, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1),
+            nn.Tanh()
+        )
+        
+        self.to(self.device)
+
+    def get_num_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def forward(self, x):
+        x = self.startBlock(x)
+        for resBlock in self.backBone:
+            x = resBlock(x)
+            
+        policy = self.policyHead(x)
+        value = self.valueHead(x)
+        
+        # Policy is logits, will use CrossEntropyLoss which expects logits.
+        # But for MCTS we need probabilities. So we return logits here and apply softmax in predict.
+        # Wait, the prompt says "CrossEntropyLoss expects logits". Let's return logits and value.
+        return policy, value
+
+    def predict(self, board):
+        """
+        Takes a single board (2D numpy array), runs it through the network,
+        and returns policy (probabilities) and value.
+        """
+        # Prepare input
+        board_tensor = torch.tensor(board, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
+        
+        self.eval()
+        with torch.no_grad():
+            policy_logits, value = self(board_tensor)
+            
+            # Apply softmax to get probabilities
+            policy = torch.softmax(policy_logits, dim=1).squeeze(0).cpu().numpy()
+            value = value.squeeze(0).cpu().item()
+            
+        return policy, value
