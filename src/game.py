@@ -114,7 +114,7 @@ class ConnectFour:
                         return -1
         
         if not np.any(self.get_valid_moves(board)):
-            return 1e-4 # Draw
+            return 1e-4  # Draw (non-zero sentinel to distinguish from ongoing=0)
             
         return 0 # Ongoing
 
