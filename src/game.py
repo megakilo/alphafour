@@ -87,7 +87,7 @@ class ConnectFour:
         """
         return board * player
 
-    def get_game_ended(self, board, player, action):
+    def get_game_ended(self, board, player, action=None):
         """
         Returns:
             0 if not ended
@@ -95,12 +95,23 @@ class ConnectFour:
             -1 if player lost
             1e-4 if draw
         """
-        win_player = self.check_win(board, action)
-        if win_player is not None:
-            if win_player == player:
-                return 1
-            else:
-                return -1
+        if action is not None:
+            # Fast path: only check around the last action
+            win_player = self.check_win(board, action)
+            if win_player is not None:
+                if win_player == player:
+                    return 1
+                else:
+                    return -1
+        else:
+            # Slow path: scan all columns for a win (used when action is unknown)
+            for col in range(self.cols):
+                win_player = self.check_win(board, col)
+                if win_player is not None:
+                    if win_player == player:
+                        return 1
+                    else:
+                        return -1
         
         if not np.any(self.get_valid_moves(board)):
             return 1e-4 # Draw
