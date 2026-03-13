@@ -50,7 +50,8 @@ class MCTS:
         counts = [c if valids[a] else 0 for a, c in enumerate(counts)]
 
         if temp == 0:
-            bestAs = np.array(np.argwhere(counts == np.max(counts))).flatten()
+            counts = np.array(counts)
+            bestAs = np.argwhere(counts == np.max(counts)).flatten()
             bestA = np.random.choice(bestAs)
             probs = [0] * len(counts)
             probs[bestA] = 1
