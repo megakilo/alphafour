@@ -16,7 +16,7 @@ def play(checkpoint_path, cpuct=1.0):
 
     # MCTS settings for the AI
     # Increase num_simulations to make the AI stronger (and slower)
-    mcts = MCTS(game, nnet, num_simulations=100, c_puct=cpuct)
+    mcts = MCTS(game, nnet, num_simulations=100, c_puct=cpuct, dirichlet_epsilon=0)
 
     board = game.get_initial_state()
     cur_player = 1 # 1 for Human, -1 for AI (or vice-versa)

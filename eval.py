@@ -46,8 +46,8 @@ def _evaluation_worker(args_tuple):
     model2.load_state_dict(model2_state)
     model2.eval()
 
-    mcts1 = MCTS(game, model1, num_simulations=mcts_sims, c_puct=cpuct)
-    mcts2 = MCTS(game, model2, num_simulations=mcts_sims, c_puct=cpuct)
+    mcts1 = MCTS(game, model1, num_simulations=mcts_sims, c_puct=cpuct, dirichlet_epsilon=0)
+    mcts2 = MCTS(game, model2, num_simulations=mcts_sims, c_puct=cpuct, dirichlet_epsilon=0)
 
     if model1_starts:
         res = play_game(game, mcts1, mcts2)

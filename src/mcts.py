@@ -2,11 +2,13 @@ import math
 import numpy as np
 
 class MCTS:
-    def __init__(self, game, model, num_simulations=50, c_puct=1.0):
+    def __init__(self, game, model, num_simulations=50, c_puct=1.0, dirichlet_alpha=1.0, dirichlet_epsilon=0.25):
         self.game = game
         self.model = model
         self.num_simulations = num_simulations
         self.c_puct = c_puct
+        self.dirichlet_alpha = dirichlet_alpha
+        self.dirichlet_epsilon = dirichlet_epsilon
 
         self.Qsa = {}  # stores Q values for s,a (as defined in the paper)
         self.Nsa = {}  # stores #times edge s,a was visited
@@ -27,6 +29,18 @@ class MCTS:
         """
         for i in range(self.num_simulations):
             self.search(canonicalBoard)
+            # After first simulation expands root, add Dirichlet noise to root priors
+            if i == 0 and self.dirichlet_epsilon > 0:
+                s = self.game.string_representation(canonicalBoard)
+                if s in self.Ps:
+                    noise = np.random.dirichlet([self.dirichlet_alpha] * self.game.action_size)
+                    self.Ps[s] = (1 - self.dirichlet_epsilon) * self.Ps[s] + self.dirichlet_epsilon * noise
+                    # Re-mask and renormalize
+                    valids = self.Vs.get(s, self.game.get_valid_moves(canonicalBoard))
+                    self.Ps[s] = self.Ps[s] * valids
+                    sum_ps = np.sum(self.Ps[s])
+                    if sum_ps > 0:
+                        self.Ps[s] /= sum_ps
 
         s = self.game.string_representation(canonicalBoard)
         counts = [self.Nsa.get((s, a), 0) for a in range(self.game.action_size)]
