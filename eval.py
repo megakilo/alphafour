@@ -56,7 +56,7 @@ def _evaluation_worker(args_tuple):
         if res == 1: res = -1
         elif res == -1: res = 1
 
-    return res
+    return res, model1_starts
 
 
 def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, num_workers=None):
@@ -78,9 +78,11 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, num_workers=None):
     model2.load_state_dict(checkpoint2['state_dict'])
     model2_state = {k: v.cpu() for k, v in model2.state_dict().items()}
 
-    wins1 = 0
-    wins2 = 0
-    draws = 0
+    # Stats: [wins1, wins2, draws] indexed by who went first
+    stats = {
+        'model1_first': {'wins1': 0, 'wins2': 0, 'draws': 0},
+        'model2_first': {'wins1': 0, 'wins2': 0, 'draws': 0},
+    }
 
     # We want half games where Model 1 starts, half where Model 2 starts
     total_games = (num_games // 2) * 2
@@ -93,20 +95,42 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, num_workers=None):
 
     with mp.Pool(processes=num_workers) as pool:
         pbar = tqdm(total=total_games, desc="Evaluation (Pool)")
-        for res in pool.imap_unordered(_evaluation_worker, worker_args):
+        for res, m1_started in pool.imap_unordered(_evaluation_worker, worker_args):
+            bucket = 'model1_first' if m1_started else 'model2_first'
             if res == 1:
-                wins1 += 1
+                stats[bucket]['wins1'] += 1
             elif res == -1:
-                wins2 += 1
+                stats[bucket]['wins2'] += 1
             else:
-                draws += 1
+                stats[bucket]['draws'] += 1
             pbar.update(1)
         pbar.close()
-    
-    print(f"\n--- Evaluation Results ({total_games} games) ---")
-    print(f"Model 1 ({os.path.basename(cp1_path)}): {wins1} wins ({wins1/total_games:.2%})")
-    print(f"Model 2 ({os.path.basename(cp2_path)}): {wins2} wins ({wins2/total_games:.2%})")
-    print(f"Draws: {draws} ({draws/total_games:.2%})")
+
+    m1f = stats['model1_first']
+    m2f = stats['model2_first']
+    total_w1 = m1f['wins1'] + m2f['wins1']
+    total_w2 = m1f['wins2'] + m2f['wins2']
+    total_d  = m1f['draws'] + m2f['draws']
+
+    m1_name = os.path.basename(cp1_path)
+    m2_name = os.path.basename(cp2_path)
+
+    print(f"\n{'=' * 60}")
+    print(f"  Evaluation Results ({total_games} games)")
+    print(f"{'=' * 60}")
+    print(f"  Model 1: {m1_name}")
+    print(f"  Model 2: {m2_name}")
+    print(f"{'-' * 60}")
+    print(f"  {'':>20s} {'M1 Wins':>10s} {'M2 Wins':>10s} {'Draws':>10s}")
+    print(f"  {'M1 goes first':>20s} {m1f['wins1']:>10d} {m1f['wins2']:>10d} {m1f['draws']:>10d}")
+    print(f"  {'M2 goes first':>20s} {m2f['wins1']:>10d} {m2f['wins2']:>10d} {m2f['draws']:>10d}")
+    print(f"{'-' * 60}")
+    print(f"  {'Overall':>20s} {total_w1:>10d} {total_w2:>10d} {total_d:>10d}")
+    print(f"{'=' * 60}")
+    print(f"  Model 1 win rate: {total_w1}/{total_games} ({total_w1/total_games:.2%})")
+    print(f"  Model 2 win rate: {total_w2}/{total_games} ({total_w2/total_games:.2%})")
+    print(f"  Draw rate:        {total_d}/{total_games} ({total_d/total_games:.2%})")
+    print(f"{'=' * 60}")
 
 if __name__ == "__main__":
     import argparse
