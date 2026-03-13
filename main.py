@@ -12,7 +12,7 @@ def main():
     parser.add_argument('--eps', type=int, default=300, help='Episodes per iteration')
     parser.add_argument('--sims', type=int, default=400, help='MCTS simulations per move')
     parser.add_argument('--workers', type=int, default=os.cpu_count(), help='Number of parallel workers for self-play')
-    parser.add_argument('--cpuct', type=float, default=2.0, help='PUCT exploration constant')
+    parser.add_argument('--cpuct', type=float, default=1.0, help='PUCT exploration constant')
     parser.add_argument('--checkpoint', type=str, default='./temp/', help='Directory to save checkpoints')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs per iteration')

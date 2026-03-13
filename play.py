@@ -4,7 +4,7 @@ from src.game import ConnectFour
 from src.model import AlphaZeroNet
 from src.mcts import MCTS
 
-def play(checkpoint_path):
+def play(checkpoint_path, cpuct=1.0):
     game = ConnectFour()
     nnet = AlphaZeroNet(game)
     
@@ -16,7 +16,7 @@ def play(checkpoint_path):
 
     # MCTS settings for the AI
     # Increase num_simulations to make the AI stronger (and slower)
-    mcts = MCTS(game, nnet, num_simulations=100)
+    mcts = MCTS(game, nnet, num_simulations=100, c_puct=cpuct)
 
     board = game.get_initial_state()
     cur_player = 1 # 1 for Human, -1 for AI (or vice-versa)
@@ -83,7 +83,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Play Connect Four against a checkpoint file.')
     parser.add_argument('--cp', type=str, required=True, help='Path to checkpoint')
+    parser.add_argument('--cpuct', type=float, default=1.0, help='PUCT exploration constant')
     
     args = parser.parse_args()
 
-    play(args.cp)
+    play(args.cp, cpuct=args.cpuct)
