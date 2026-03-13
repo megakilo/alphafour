@@ -51,13 +51,13 @@ class AlphaZeroNet(nn.Module):
         )
         
         self.valueHead = nn.Sequential(
-            nn.Conv2d(num_hidden, 3, kernel_size=3, padding=1),
-            nn.BatchNorm2d(3),
+            nn.Conv2d(num_hidden, 1, kernel_size=1),
+            nn.BatchNorm2d(1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(3 * game.rows * game.cols, 32),
+            nn.Linear(1 * game.rows * game.cols, 128),
             nn.ReLU(),
-            nn.Linear(32, 1),
+            nn.Linear(128, 1),
             nn.Tanh()
         )
         
