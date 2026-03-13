@@ -179,6 +179,8 @@ class Trainer:
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'scheduler': self.scheduler.state_dict(),
+            'num_resBlocks': self.model.num_resBlocks,
+            'num_hidden': self.model.num_hidden,
         }, filepath)
 
     def load_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar'):

@@ -22,6 +22,8 @@ class ResBlock(nn.Module):
 class AlphaZeroNet(nn.Module):
     def __init__(self, game, num_resBlocks=5, num_hidden=128):
         super().__init__()
+        self.num_resBlocks = num_resBlocks
+        self.num_hidden = num_hidden
         self.action_size = game.action_size
         if torch.backends.mps.is_available():
             self.device = torch.device("mps")

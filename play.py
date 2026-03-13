@@ -6,13 +6,17 @@ from src.mcts import MCTS
 
 def play(checkpoint_path, cpuct=1.0):
     game = ConnectFour()
-    nnet = AlphaZeroNet(game)
     
-    # Load the checkpoint
+    # Load the checkpoint and auto-detect architecture
     print(f"Loading checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=nnet.device)
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
+    num_resBlocks = checkpoint.get('num_resBlocks', 5)
+    num_hidden = checkpoint.get('num_hidden', 128)
+    
+    nnet = AlphaZeroNet(game, num_resBlocks=num_resBlocks, num_hidden=num_hidden)
     nnet.load_state_dict(checkpoint['state_dict'])
     nnet.eval()
+    print(f"Model: {num_resBlocks} res blocks, {num_hidden} hidden channels")
 
     # MCTS settings for the AI
     # Increase num_simulations to make the AI stronger (and slower)

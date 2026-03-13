@@ -36,13 +36,13 @@ def _evaluation_worker(args_tuple):
     """
     Worker function for the process pool. Plays a single evaluation game.
     """
-    game, model1_state, model2_state, mcts_sims, cpuct, num_resBlocks, num_hidden, model1_starts = args_tuple
+    game, model1_state, model2_state, mcts_sims, cpuct, num_resBlocks1, num_hidden1, num_resBlocks2, num_hidden2, model1_starts = args_tuple
 
-    model1 = AlphaZeroNet(game, num_resBlocks=num_resBlocks, num_hidden=num_hidden)
+    model1 = AlphaZeroNet(game, num_resBlocks=num_resBlocks1, num_hidden=num_hidden1)
     model1.load_state_dict(model1_state)
     model1.eval()
 
-    model2 = AlphaZeroNet(game, num_resBlocks=num_resBlocks, num_hidden=num_hidden)
+    model2 = AlphaZeroNet(game, num_resBlocks=num_resBlocks2, num_hidden=num_hidden2)
     model2.load_state_dict(model2_state)
     model2.eval()
 
@@ -59,24 +59,30 @@ def _evaluation_worker(args_tuple):
     return res, model1_starts
 
 
-def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_resBlocks=5, num_hidden=128, num_workers=None):
+def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_workers=None):
     game = ConnectFour()
     if num_workers is None:
         num_workers = os.cpu_count()
 
-    # Load Model 1
-    model1 = AlphaZeroNet(game, num_resBlocks=num_resBlocks, num_hidden=num_hidden)
+    # Load Model 1 (auto-detect architecture from checkpoint)
     print(f"Loading Model 1: {cp1_path}")
-    checkpoint1 = torch.load(cp1_path, map_location=model1.device)
+    checkpoint1 = torch.load(cp1_path, weights_only=False)
+    num_resBlocks1 = checkpoint1.get('num_resBlocks', 5)
+    num_hidden1 = checkpoint1.get('num_hidden', 128)
+    model1 = AlphaZeroNet(game, num_resBlocks=num_resBlocks1, num_hidden=num_hidden1)
     model1.load_state_dict(checkpoint1['state_dict'])
     model1_state = {k: v.cpu() for k, v in model1.state_dict().items()}
+    print(f"  Architecture: {num_resBlocks1} res blocks, {num_hidden1} hidden channels")
 
-    # Load Model 2
-    model2 = AlphaZeroNet(game, num_resBlocks=num_resBlocks, num_hidden=num_hidden)
+    # Load Model 2 (auto-detect architecture from checkpoint)
     print(f"Loading Model 2: {cp2_path}")
-    checkpoint2 = torch.load(cp2_path, map_location=model2.device)
+    checkpoint2 = torch.load(cp2_path, weights_only=False)
+    num_resBlocks2 = checkpoint2.get('num_resBlocks', 5)
+    num_hidden2 = checkpoint2.get('num_hidden', 128)
+    model2 = AlphaZeroNet(game, num_resBlocks=num_resBlocks2, num_hidden=num_hidden2)
     model2.load_state_dict(checkpoint2['state_dict'])
     model2_state = {k: v.cpu() for k, v in model2.state_dict().items()}
+    print(f"  Architecture: {num_resBlocks2} res blocks, {num_hidden2} hidden channels")
 
     # Stats: [wins1, wins2, draws] indexed by who went first
     stats = {
@@ -89,7 +95,7 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_res
     half = total_games // 2
 
     worker_args = [
-        (game, model1_state, model2_state, mcts_sims, cpuct, num_resBlocks, num_hidden, i < half)
+        (game, model1_state, model2_state, mcts_sims, cpuct, num_resBlocks1, num_hidden1, num_resBlocks2, num_hidden2, i < half)
         for i in range(total_games)
     ]
 
@@ -140,10 +146,8 @@ if __name__ == "__main__":
     parser.add_argument('--games', type=int, default=20, help='Number of games to play (should be even)')
     parser.add_argument('--sims', type=int, default=1000, help='MCTS simulations per move')
     parser.add_argument('--cpuct', type=float, default=1.0, help='PUCT exploration constant')
-    parser.add_argument('--num-res-blocks', type=int, default=5, help='Number of residual blocks')
-    parser.add_argument('--num-hidden', type=int, default=128, help='Number of hidden channels')
     parser.add_argument('--workers', type=int, default=None, help='Number of parallel workers (default: cpu_count)')
     
     args = parser.parse_args()
     
-    evaluate(args.cp1, args.cp2, num_games=args.games, mcts_sims=args.sims, cpuct=args.cpuct, num_resBlocks=args.num_res_blocks, num_hidden=args.num_hidden, num_workers=args.workers)
+    evaluate(args.cp1, args.cp2, num_games=args.games, mcts_sims=args.sims, cpuct=args.cpuct, num_workers=args.workers)
