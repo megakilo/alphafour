@@ -7,19 +7,22 @@ from tqdm import tqdm
 from .mcts import MCTS
 import multiprocessing as mp
 
-def self_play_worker(game, model_state_dict, args, queue):
+
+def _self_play_worker(args_tuple):
     """
-    Worker function for parallel self-play.
+    Worker function for the process pool. Each worker process calls this
+    repeatedly, reusing the same process for multiple episodes.
     """
+    game, model_state_dict, args = args_tuple
     from .model import AlphaZeroNet
-    # Create a local model instance for this process
+
     model = AlphaZeroNet(game)
     model.load_state_dict(model_state_dict)
     model.eval()
-    
+
     trainer = Trainer(game, model, args)
-    episode_data = trainer.execute_episode()
-    queue.put(episode_data)
+    return trainer.execute_episode()
+
 
 class Trainer:
     def __init__(self, game, model, args):
@@ -82,44 +85,18 @@ class Trainer:
             print(f'------ITER {i}------')
             train_examples = []
             
-            # Use multiprocessing for self-play
             self.model.eval()
             model_state_dict = {k: v.cpu() for k, v in self.model.state_dict().items()}
             
-            # Since self-play with MCTS can be slow, we'll use a pool-like approach
-            # but manually to manage the queue and progress bar.
-            queue = mp.Queue()
-            processes = []
-            
             episodes_to_run = self.args['num_eps']
-            episodes_finished = 0
-            
-            pbar = tqdm(total=episodes_to_run, desc="Self Play (Parallel)")
-            
-            while episodes_finished < episodes_to_run:
-                # Fill up worker slots
-                while len(processes) < num_workers and (episodes_finished + len(processes)) < episodes_to_run:
-                    p = mp.Process(target=self_play_worker, args=(self.game, model_state_dict, self.args, queue))
-                    p.start()
-                    processes.append(p)
-                
-                # Get results from queue
-                try:
-                    # Timeout to check on processes and update bar
-                    result = queue.get(timeout=1.0)
-                    train_examples.extend(result)
-                    episodes_finished += 1
+            worker_args = [(self.game, model_state_dict, self.args)] * episodes_to_run
+
+            with mp.Pool(processes=num_workers) as pool:
+                pbar = tqdm(total=episodes_to_run, desc="Self Play (Pool)")
+                for episode_data in pool.imap_unordered(_self_play_worker, worker_args):
+                    train_examples.extend(episode_data)
                     pbar.update(1)
-                except:
-                    pass
-                
-                # Clean up finished processes
-                for p in processes:
-                    if not p.is_alive():
-                        p.join()
-                        processes.remove(p)
-            
-            pbar.close()
+                pbar.close()
             
             # Standard training phase
             np.random.shuffle(train_examples)

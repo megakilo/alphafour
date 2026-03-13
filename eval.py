@@ -32,96 +32,76 @@ def play_game(game, mcts1, mcts2):
             
         cur_player = -cur_player
 
-def evaluation_worker(game, model1_state, model2_state, mcts_sims, model1_starts, queue):
+def _evaluation_worker(args_tuple):
     """
-    Worker function to play a single evaluation game in parallel.
+    Worker function for the process pool. Plays a single evaluation game.
     """
-    # Initialize models and load states
+    game, model1_state, model2_state, mcts_sims, model1_starts = args_tuple
+
     model1 = AlphaZeroNet(game)
     model1.load_state_dict(model1_state)
     model1.eval()
-    
+
     model2 = AlphaZeroNet(game)
     model2.load_state_dict(model2_state)
     model2.eval()
-    
-    # Initialize MCTS
+
     mcts1 = MCTS(game, model1, num_simulations=mcts_sims)
     mcts2 = MCTS(game, model2, num_simulations=mcts_sims)
-    
+
     if model1_starts:
         res = play_game(game, mcts1, mcts2)
-        # 1 means mcts1 won, -1 means mcts2 won, 1e-4 draw
     else:
         res = play_game(game, mcts2, mcts1)
-        # 1 means mcts2 won, -1 means mcts1 won, 1e-4 draw
-        if res == 1: res = -1 # mcts2 won, return from mcts1's perspective
-        elif res == -1: res = 1 # mcts1 won, return from mcts1's perspective
-        
-    queue.put(res)
+        if res == 1: res = -1
+        elif res == -1: res = 1
+
+    return res
+
 
 def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, num_workers=None):
     game = ConnectFour()
     if num_workers is None:
         num_workers = os.cpu_count()
-    
+
     # Load Model 1
     model1 = AlphaZeroNet(game, num_resBlocks=5, num_hidden=128)
     print(f"Loading Model 1: {cp1_path}")
     checkpoint1 = torch.load(cp1_path, map_location=model1.device)
     model1.load_state_dict(checkpoint1['state_dict'])
     model1_state = {k: v.cpu() for k, v in model1.state_dict().items()}
-    
+
     # Load Model 2
     model2 = AlphaZeroNet(game, num_resBlocks=5, num_hidden=128)
     print(f"Loading Model 2: {cp2_path}")
     checkpoint2 = torch.load(cp2_path, map_location=model2.device)
     model2.load_state_dict(checkpoint2['state_dict'])
     model2_state = {k: v.cpu() for k, v in model2.state_dict().items()}
-    
+
     wins1 = 0
     wins2 = 0
     draws = 0
-    
-    queue = mp.Queue()
-    processes = []
-    
+
     # We want half games where Model 1 starts, half where Model 2 starts
     total_games = (num_games // 2) * 2
-    games_finished = 0
-    
-    pbar = tqdm(total=total_games, desc="Evaluation (Parallel)")
-    
-    while games_finished < total_games:
-        # Spawn workers
-        while len(processes) < num_workers and (games_finished + len(processes)) < total_games:
-            # Alternate starters
-            model1_starts = (games_finished + len(processes)) < (total_games // 2)
-            p = mp.Process(target=evaluation_worker, args=(game, model1_state, model2_state, mcts_sims, model1_starts, queue))
-            p.start()
-            processes.append(p)
-            
-        # Collect results
-        try:
-            res = queue.get(timeout=1.0)
+    half = total_games // 2
+
+    worker_args = [
+        (game, model1_state, model2_state, mcts_sims, i < half)
+        for i in range(total_games)
+    ]
+
+    with mp.Pool(processes=num_workers) as pool:
+        pbar = tqdm(total=total_games, desc="Evaluation (Pool)")
+        for res in pool.imap_unordered(_evaluation_worker, worker_args):
             if res == 1:
                 wins1 += 1
             elif res == -1:
                 wins2 += 1
             else:
                 draws += 1
-            games_finished += 1
             pbar.update(1)
-        except:
-            pass
-            
-        # Clean up processes
-        for p in processes:
-            if not p.is_alive():
-                p.join()
-                processes.remove(p)
-                
-    pbar.close()
+        pbar.close()
     
     print(f"\n--- Evaluation Results ({total_games} games) ---")
     print(f"Model 1 ({os.path.basename(cp1_path)}): {wins1} wins ({wins1/total_games:.2%})")
