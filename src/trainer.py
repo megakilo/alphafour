@@ -115,11 +115,13 @@ class Trainer:
             print(f'EPOCH ::: {epoch+1}')
             self.model.train()
             
+            # Shuffle indices for proper epoch (each example seen exactly once)
+            perm = np.random.permutation(len(examples))
             batch_count = int(len(examples) / batch_size)
             pbar = tqdm(range(batch_count), desc="Training")
             
-            for _ in pbar:
-                sample_ids = np.random.randint(len(examples), size=batch_size)
+            for batch_idx in pbar:
+                sample_ids = perm[batch_idx * batch_size : (batch_idx + 1) * batch_size]
                 boards, pis, vs = list(zip(*[examples[i] for i in sample_ids]))
                 
                 boards = torch.tensor(np.array(boards), dtype=torch.float32, device=self.model.device).unsqueeze(1)
