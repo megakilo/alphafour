@@ -18,6 +18,8 @@ def main():
     parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs per iteration')
     parser.add_argument('--batch-size', type=int, default=256, help='Batch size for training')
     parser.add_argument('--temp-threshold', type=int, default=10, help='Temperature threshold for MCTS')
+    parser.add_argument('--lr-milestones', type=int, nargs='*', default=[], help='Iterations at which to drop LR (e.g. --lr-milestones 10 15)')
+    parser.add_argument('--lr-gamma', type=float, default=0.1, help='LR decay factor at each milestone')
     
     args_cli = parser.parse_args()
 
@@ -40,6 +42,8 @@ def main():
         'epochs': args_cli.epochs,
         'batch_size': args_cli.batch_size,
         'num_workers': args_cli.workers,
+        'lr_milestones': args_cli.lr_milestones,
+        'lr_gamma': args_cli.lr_gamma,
     }
 
     print("Initializing Game...")

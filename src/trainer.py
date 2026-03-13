@@ -30,6 +30,10 @@ class Trainer:
         self.model = model
         self.args = args
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.args['lr'])
+        # LR schedule: drop LR by gamma at specified iteration milestones
+        milestones = self.args.get('lr_milestones', [])
+        gamma = self.args.get('lr_gamma', 0.1)
+        self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=milestones, gamma=gamma)
 
     def execute_episode(self):
         """
@@ -102,6 +106,10 @@ class Trainer:
             np.random.shuffle(train_examples)
             self.train(train_examples)
             
+            # Step LR scheduler (per iteration)
+            self.scheduler.step()
+            print(f'LR: {self.scheduler.get_last_lr()[0]:.6f}')
+            
             # Save checkpoint
             self.save_checkpoint(folder=self.args['checkpoint'], filename=f'checkpoint_{i}.pth.tar')
 
@@ -156,6 +164,7 @@ class Trainer:
         torch.save({
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
         }, filepath)
 
     def load_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar'):
@@ -166,3 +175,5 @@ class Trainer:
         self.model.load_state_dict(checkpoint['state_dict'])
         if 'optimizer' in checkpoint:
             self.optimizer.load_state_dict(checkpoint['optimizer'])
+        if 'scheduler' in checkpoint:
+            self.scheduler.load_state_dict(checkpoint['scheduler'])
