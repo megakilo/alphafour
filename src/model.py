@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 class ResBlock(nn.Module):
     def __init__(self, num_hidden):
@@ -29,8 +30,10 @@ class AlphaZeroNet(nn.Module):
         else:
             self.device = torch.device("cpu")
         
+        # 2-channel input: (current player's pieces, opponent's pieces)
+        self.num_input_channels = 2
         self.startBlock = nn.Sequential(
-            nn.Conv2d(1, num_hidden, kernel_size=3, padding=1),
+            nn.Conv2d(self.num_input_channels, num_hidden, kernel_size=3, padding=1),
             nn.BatchNorm2d(num_hidden),
             nn.ReLU()
         )
@@ -76,13 +79,27 @@ class AlphaZeroNet(nn.Module):
         # Wait, the prompt says "CrossEntropyLoss expects logits". Let's return logits and value.
         return policy, value
 
+    @staticmethod
+    def encode_board(board):
+        """
+        Encodes a canonical board (2D numpy array where 1=current player,
+        -1=opponent) into a 2-channel representation:
+          Channel 0: current player's pieces (1 where player has a piece)
+          Channel 1: opponent's pieces (1 where opponent has a piece)
+        Returns a (2, rows, cols) numpy array.
+        """
+        current = (board == 1).astype(np.float32)
+        opponent = (board == -1).astype(np.float32)
+        return np.stack([current, opponent], axis=0)
+
     def predict(self, board):
         """
         Takes a single board (2D numpy array), runs it through the network,
         and returns policy (probabilities) and value.
         """
-        # Prepare input
-        board_tensor = torch.tensor(board, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
+        # Encode as 2-channel input
+        encoded = self.encode_board(board)
+        board_tensor = torch.tensor(encoded, dtype=torch.float32, device=self.device).unsqueeze(0)
         
         self.eval()
         with torch.no_grad():

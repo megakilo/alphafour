@@ -144,7 +144,9 @@ class Trainer:
                 sample_ids = perm[batch_idx * batch_size : (batch_idx + 1) * batch_size]
                 boards, pis, vs = list(zip(*[examples[i] for i in sample_ids]))
                 
-                boards = torch.tensor(np.array(boards), dtype=torch.float32, device=self.model.device).unsqueeze(1)
+                from .model import AlphaZeroNet
+                encoded_boards = np.array([AlphaZeroNet.encode_board(b) for b in boards])
+                boards = torch.tensor(encoded_boards, dtype=torch.float32, device=self.model.device)
                 target_pis = torch.tensor(np.array(pis), dtype=torch.float32, device=self.model.device)
                 target_vs = torch.tensor(np.array(vs), dtype=torch.float32, device=self.model.device).unsqueeze(1)
 
