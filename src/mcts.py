@@ -2,7 +2,7 @@ import math
 import numpy as np
 
 class MCTS:
-    def __init__(self, game, model, num_simulations=50, c_puct=1.0, dirichlet_alpha=1.0, dirichlet_epsilon=0.25):
+    def __init__(self, game, model, num_simulations=50, c_puct=1.0, dirichlet_alpha=1.4, dirichlet_epsilon=0.25):
         self.game = game
         self.model = model
         self.num_simulations = num_simulations
@@ -109,7 +109,7 @@ class MCTS:
                 if (s, a) in self.Qsa:
                     u = self.Qsa[(s, a)] + self.c_puct * self.Ps[s][a] * math.sqrt(self.Ns[s]) / (1 + self.Nsa[(s, a)])
                 else:
-                    u = self.c_puct * self.Ps[s][a] * math.sqrt(self.Ns[s] + 1e-8)  # Q = 0 ?
+                    u = -1.0 + self.c_puct * self.Ps[s][a] * math.sqrt(self.Ns[s] + 1e-8)  # FPU reduction
 
                 if u > cur_best_u:
                     cur_best_u = u

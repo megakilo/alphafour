@@ -107,8 +107,15 @@ class AlphaZeroNet(nn.Module):
         with torch.no_grad():
             policy_logits, value = self(board_tensor)
             
-            # Apply softmax to get probabilities
-            policy = torch.softmax(policy_logits, dim=1).squeeze(0).cpu().numpy()
+            # Mask invalid moves before softmax so all probability
+            # mass is concentrated on legal actions
+            valid_moves = torch.tensor(
+                (board[0] == 0).astype(np.float32), device=self.device
+            )
+            policy_logits = policy_logits.squeeze(0)
+            policy_logits[valid_moves == 0] = -float('inf')
+            
+            policy = torch.softmax(policy_logits, dim=0).cpu().numpy()
             value = value.squeeze(0).cpu().item()
             
         return policy, value

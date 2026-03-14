@@ -131,24 +131,29 @@ class Trainer:
         """
         batch_size = self.args['batch_size']
         
+        # Pre-encode all boards once before the training loop
+        from .model import AlphaZeroNet
+        all_boards = np.array([AlphaZeroNet.encode_board(ex[0]) for ex in examples])
+        all_pis = np.array([ex[1] for ex in examples])
+        all_vs = np.array([ex[2] for ex in examples])
+        
+        dataset = torch.utils.data.TensorDataset(
+            torch.tensor(all_boards, dtype=torch.float32),
+            torch.tensor(all_pis, dtype=torch.float32),
+            torch.tensor(all_vs, dtype=torch.float32),
+        )
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        
         for epoch in range(self.args['epochs']):
             print(f'EPOCH ::: {epoch+1}')
             self.model.train()
             
-            # Shuffle indices for proper epoch (each example seen exactly once)
-            perm = np.random.permutation(len(examples))
-            batch_count = int(len(examples) / batch_size)
-            pbar = tqdm(range(batch_count), desc="Training")
+            pbar = tqdm(loader, desc="Training")
             
-            for batch_idx in pbar:
-                sample_ids = perm[batch_idx * batch_size : (batch_idx + 1) * batch_size]
-                boards, pis, vs = list(zip(*[examples[i] for i in sample_ids]))
-                
-                from .model import AlphaZeroNet
-                encoded_boards = np.array([AlphaZeroNet.encode_board(b) for b in boards])
-                boards = torch.tensor(encoded_boards, dtype=torch.float32, device=self.model.device)
-                target_pis = torch.tensor(np.array(pis), dtype=torch.float32, device=self.model.device)
-                target_vs = torch.tensor(np.array(vs), dtype=torch.float32, device=self.model.device).unsqueeze(1)
+            for batch_boards, batch_pis, batch_vs in pbar:
+                boards = batch_boards.to(self.model.device, non_blocking=True)
+                target_pis = batch_pis.to(self.model.device, non_blocking=True)
+                target_vs = batch_vs.to(self.model.device, non_blocking=True).unsqueeze(1)
 
                 # predict
                 out_pi, out_v = self.model(boards)
@@ -159,8 +164,9 @@ class Trainer:
                 total_loss = l_pi + l_v
 
                 # backprop
-                self.optimizer.zero_grad()
+                self.optimizer.zero_grad(set_to_none=True)
                 total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 
                 pbar.set_postfix({'loss_pi': l_pi.item(), 'loss_v': l_v.item()})

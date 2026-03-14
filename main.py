@@ -8,7 +8,7 @@ from src.trainer import Trainer
 def main():
     parser = argparse.ArgumentParser(description='AlphaZero Connect Four Training')
     parser.add_argument('--resume', action='store_true', default=True, help='Resume training from the latest checkpoint')
-    parser.add_argument('--iters', type=int, default=20, help='Number of iterations')
+    parser.add_argument('--iters', type=int, default=30, help='Number of iterations')
     parser.add_argument('--eps', type=int, default=300, help='Episodes per iteration')
     parser.add_argument('--sims', type=int, default=400, help='MCTS simulations per move')
     parser.add_argument('--workers', type=int, default=os.cpu_count(), help='Number of parallel workers for self-play')
