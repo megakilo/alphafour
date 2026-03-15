@@ -4,6 +4,13 @@ import torch.nn.functional as F
 import numpy as np
 
 
+def _auto_device():
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
 class ResBlock(nn.Module):
     def __init__(self, num_hidden):
         super().__init__()
@@ -20,20 +27,14 @@ class ResBlock(nn.Module):
         x = F.relu(x)
         return x
 
-
 class AlphaZeroNet(nn.Module):
-    def __init__(self, game, num_resBlocks=5, num_hidden=128):
+    def __init__(self, game, num_resBlocks=5, num_hidden=128, device=None):
         super().__init__()
         self.num_resBlocks = num_resBlocks
         self.num_hidden = num_hidden
         self.action_size = game.action_size
-        if torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
-
+        self.device = _auto_device() if device is None else torch.device(device)
+        
         # 2-channel input: (current player's pieces, opponent's pieces)
         self.num_input_channels = 2
         self.startBlock = nn.Sequential(
@@ -41,11 +42,11 @@ class AlphaZeroNet(nn.Module):
             nn.BatchNorm2d(num_hidden),
             nn.ReLU()
         )
-
+        
         self.backBone = nn.ModuleList(
             [ResBlock(num_hidden) for i in range(num_resBlocks)]
         )
-
+        
         self.policyHead = nn.Sequential(
             nn.Conv2d(num_hidden, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
@@ -53,7 +54,7 @@ class AlphaZeroNet(nn.Module):
             nn.Flatten(),
             nn.Linear(32 * game.rows * game.cols, self.action_size)
         )
-
+        
         self.valueHead = nn.Sequential(
             nn.Conv2d(num_hidden, 1, kernel_size=1),
             nn.BatchNorm2d(1),
@@ -64,7 +65,7 @@ class AlphaZeroNet(nn.Module):
             nn.Linear(128, 1),
             nn.Tanh()
         )
-
+        
         self.to(self.device)
 
     def get_num_parameters(self):
@@ -74,7 +75,7 @@ class AlphaZeroNet(nn.Module):
         x = self.startBlock(x)
         for resBlock in self.backBone:
             x = resBlock(x)
-
+            
         policy = self.policyHead(x)
         value = self.valueHead(x)
         return policy, value

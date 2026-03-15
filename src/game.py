@@ -5,6 +5,7 @@ class ConnectFour:
         self.rows = 6
         self.cols = 7
         self.action_size = self.cols
+        self.draw_value = 1e-4
 
     def get_initial_state(self):
         """Returns the initial empty board (6x7)."""
@@ -93,7 +94,7 @@ class ConnectFour:
             0 if not ended
             1 if player won
             -1 if player lost
-            1e-4 if draw
+            draw_value if draw
         """
         if action is not None:
             # Fast path: only check around the last action
@@ -114,7 +115,7 @@ class ConnectFour:
                         return -1
         
         if not np.any(self.get_valid_moves(board)):
-            return 1e-4  # Draw (non-zero sentinel to distinguish from ongoing=0)
+            return self.draw_value  # Draw (non-zero sentinel to distinguish from ongoing=0)
             
         return 0 # Ongoing
 
