@@ -12,7 +12,7 @@ def main():
     parser.set_defaults(resume=True)
     parser.add_argument('--resume', action='store_true', dest='resume', help='Resume training from the latest checkpoint')
     parser.add_argument('--no-resume', action='store_false', dest='resume', help='Start training from scratch')
-    parser.add_argument('--iters', type=int, default=30, help='Number of iterations')
+    parser.add_argument('--iters', type=int, default=50, help='Number of iterations')
     parser.add_argument('--eps', type=int, default=300, help='Episodes per iteration')
     parser.add_argument('--sims', type=int, default=400, help='MCTS simulations per move')
     parser.add_argument('--workers', type=int, default=os.cpu_count(), help='Number of parallel workers for self-play')
