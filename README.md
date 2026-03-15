@@ -15,6 +15,11 @@ Useful training flags:
 - `--sim-batch-size` / `--fpu-reduction` to tune MCTS throughput and exploration
 - `--self-play-device cpu|auto|cuda|mps` to control worker inference placement
 
+### Extract Standalone Weights
+`uv run extract_weights.py --checkpoint temp/checkpoint_8.pth.tar`
+
+This writes `temp/checkpoint_8_weights.pth` by default. The exported file keeps only model weights plus architecture metadata, so it is smaller and can be used directly with `eval.py` or `play.py`.
+
 ### Compare Model Strength
 `uv run eval.py --cp1 temp/checkpoint_1.pth.tar --cp2 temp/checkpoint_2.pth.tar`
 

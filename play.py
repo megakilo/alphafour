@@ -91,8 +91,8 @@ def print_board(board):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Play Connect Four against a checkpoint file.')
-    parser.add_argument('--cp', type=str, required=True, help='Path to checkpoint')
+    parser = argparse.ArgumentParser(description='Play Connect Four against a checkpoint or standalone weights file.')
+    parser.add_argument('--cp', type=str, required=True, help='Path to checkpoint or standalone weights file')
     parser.add_argument('--cpuct', type=float, default=1.0, help='PUCT exploration constant')
 
     args = parser.parse_args()

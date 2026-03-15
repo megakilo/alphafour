@@ -20,6 +20,27 @@ def load_checkpoint(path, map_location=None, allow_unsafe_fallback=False):
         return torch.load(path, map_location=map_location, weights_only=False)
 
 
+def build_standalone_weights(checkpoint):
+    if "state_dict" not in checkpoint:
+        raise KeyError("Checkpoint is missing 'state_dict'.")
+
+    weights = {
+        "state_dict": {
+            key: value.detach().cpu()
+            for key, value in checkpoint["state_dict"].items()
+        },
+    }
+
+    if "num_resBlocks" in checkpoint:
+        weights["num_resBlocks"] = int(checkpoint["num_resBlocks"])
+    if "num_hidden" in checkpoint:
+        weights["num_hidden"] = int(checkpoint["num_hidden"])
+    if "iteration" in checkpoint:
+        weights["iteration"] = int(checkpoint["iteration"])
+
+    return weights
+
+
 def serialize_replay_buffer(replay_buffer):
     serialized = []
     for iteration_examples in replay_buffer:

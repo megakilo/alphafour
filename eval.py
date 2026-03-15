@@ -152,9 +152,9 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_wor
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Evaluate two AlphaZero checkpoints.')
-    parser.add_argument('--cp1', type=str, required=True, help='Path to first checkpoint')
-    parser.add_argument('--cp2', type=str, required=True, help='Path to second checkpoint')
+    parser = argparse.ArgumentParser(description='Evaluate two AlphaZero checkpoints or standalone weights files.')
+    parser.add_argument('--cp1', type=str, required=True, help='Path to first checkpoint or standalone weights file')
+    parser.add_argument('--cp2', type=str, required=True, help='Path to second checkpoint or standalone weights file')
     parser.add_argument('--games', type=int, default=100, help='Number of games to play (should be even)')
     parser.add_argument('--sims', type=int, default=1000, help='MCTS simulations per move')
     parser.add_argument('--cpuct', type=float, default=1.0, help='PUCT exploration constant')
