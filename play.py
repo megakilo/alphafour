@@ -1,18 +1,20 @@
 import torch
 import numpy as np
+from src.checkpoint import load_checkpoint
 from src.game import ConnectFour
 from src.model import AlphaZeroNet
 from src.mcts import MCTS
 
+
 def play(checkpoint_path, cpuct=1.0):
     game = ConnectFour()
-    
+
     # Load the checkpoint and auto-detect architecture
     print(f"Loading checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, weights_only=False)
+    checkpoint = load_checkpoint(checkpoint_path, map_location="cpu", allow_unsafe_fallback=True)
     num_resBlocks = checkpoint.get('num_resBlocks', 5)
     num_hidden = checkpoint.get('num_hidden', 128)
-    
+
     nnet = AlphaZeroNet(game, num_resBlocks=num_resBlocks, num_hidden=num_hidden)
     nnet.load_state_dict(checkpoint['state_dict'])
     nnet.eval()
@@ -23,14 +25,14 @@ def play(checkpoint_path, cpuct=1.0):
     mcts = MCTS(game, nnet, num_simulations=100, c_puct=cpuct, dirichlet_epsilon=0)
 
     board = game.get_initial_state()
-    cur_player = 1 # 1 for Human, -1 for AI (or vice-versa)
-    
+    cur_player = 1  # 1 for Human, -1 for AI (or vice-versa)
+
     print("\n--- Connect Four vs AlphaZero ---")
     print("Human: X, AI: O")
-    
+
     while True:
         print_board(board)
-        
+
         if cur_player == 1:
             # Human Turn
             valids = game.get_valid_moves(board)
@@ -55,7 +57,7 @@ def play(checkpoint_path, cpuct=1.0):
             print(f"AI chose column: {action}")
 
         board = game.get_next_state(board, cur_player, action)
-        
+
         result = game.get_game_ended(board, cur_player, action)
         if result != 0:
             print_board(board)
@@ -64,8 +66,9 @@ def play(checkpoint_path, cpuct=1.0):
             else:
                 print("It's a draw!")
             break
-            
+
         cur_player = -cur_player
+
 
 def print_board(board):
     print("\n 0 1 2 3 4 5 6")
@@ -83,12 +86,13 @@ def print_board(board):
         print(row_str + "|")
     print("-" * 15)
 
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Play Connect Four against a checkpoint file.')
     parser.add_argument('--cp', type=str, required=True, help='Path to checkpoint')
     parser.add_argument('--cpuct', type=float, default=1.0, help='PUCT exploration constant')
-    
+
     args = parser.parse_args()
 
     play(args.cp, cpuct=args.cpuct)

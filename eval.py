@@ -2,10 +2,12 @@ import os
 import torch
 import numpy as np
 from tqdm import tqdm
+from src.checkpoint import load_checkpoint
 from src.game import ConnectFour
 from src.model import AlphaZeroNet
 from src.mcts import MCTS
 import multiprocessing as mp
+
 
 def play_game(game, mcts1, mcts2):
     """
@@ -17,20 +19,21 @@ def play_game(game, mcts1, mcts2):
     board = game.get_initial_state()
     cur_player = 1
     players = {1: mcts1, -1: mcts2}
-    
+
     while True:
         canonical_board = game.get_canonical_form(board, cur_player)
         # Use temp=0 for purely competitive play (best move)
         probs = players[cur_player].get_action_prob(canonical_board, temp=0)
         action = np.argmax(probs)
-        
+
         board = game.get_next_state(board, cur_player, action)
-        
+
         result = game.get_game_ended(board, cur_player, action)
         if result != 0:
             return result if cur_player == 1 else -result
-            
+
         cur_player = -cur_player
+
 
 def _evaluation_worker(args_tuple):
     """
@@ -53,8 +56,10 @@ def _evaluation_worker(args_tuple):
         res = play_game(game, mcts1, mcts2)
     else:
         res = play_game(game, mcts2, mcts1)
-        if res == 1: res = -1
-        elif res == -1: res = 1
+        if res == 1:
+            res = -1
+        elif res == -1:
+            res = 1
 
     return res, model1_starts
 
@@ -66,7 +71,7 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_wor
 
     # Load Model 1 (auto-detect architecture from checkpoint)
     print(f"Loading Model 1: {cp1_path}")
-    checkpoint1 = torch.load(cp1_path, weights_only=False)
+    checkpoint1 = load_checkpoint(cp1_path, map_location="cpu", allow_unsafe_fallback=True)
     num_resBlocks1 = checkpoint1.get('num_resBlocks', 5)
     num_hidden1 = checkpoint1.get('num_hidden', 128)
     model1 = AlphaZeroNet(game, num_resBlocks=num_resBlocks1, num_hidden=num_hidden1)
@@ -76,7 +81,7 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_wor
 
     # Load Model 2 (auto-detect architecture from checkpoint)
     print(f"Loading Model 2: {cp2_path}")
-    checkpoint2 = torch.load(cp2_path, weights_only=False)
+    checkpoint2 = load_checkpoint(cp2_path, map_location="cpu", allow_unsafe_fallback=True)
     num_resBlocks2 = checkpoint2.get('num_resBlocks', 5)
     num_hidden2 = checkpoint2.get('num_hidden', 128)
     model2 = AlphaZeroNet(game, num_resBlocks=num_resBlocks2, num_hidden=num_hidden2)
@@ -116,7 +121,7 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_wor
     m2f = stats['model2_first']
     total_w1 = m1f['wins1'] + m2f['wins1']
     total_w2 = m1f['wins2'] + m2f['wins2']
-    total_d  = m1f['draws'] + m2f['draws']
+    total_d = m1f['draws'] + m2f['draws']
 
     m1_name = os.path.basename(cp1_path)
     m2_name = os.path.basename(cp2_path)
@@ -133,10 +138,11 @@ def evaluate(cp1_path, cp2_path, num_games=200, mcts_sims=50, cpuct=1.0, num_wor
     print(f"{'-' * 60}")
     print(f"  {'Overall':>20s} {total_w1:>10d} {total_w2:>10d} {total_d:>10d}")
     print(f"{'=' * 60}")
-    print(f"  Model 1 win rate: {total_w1}/{total_games} ({total_w1/total_games:.2%})")
-    print(f"  Model 2 win rate: {total_w2}/{total_games} ({total_w2/total_games:.2%})")
-    print(f"  Draw rate:        {total_d}/{total_games} ({total_d/total_games:.2%})")
+    print(f"  Model 1 win rate: {total_w1}/{total_games} ({total_w1 / total_games:.2%})")
+    print(f"  Model 2 win rate: {total_w2}/{total_games} ({total_w2 / total_games:.2%})")
+    print(f"  Draw rate:        {total_d}/{total_games} ({total_d / total_games:.2%})")
     print(f"{'=' * 60}")
+
 
 if __name__ == "__main__":
     import argparse
@@ -147,7 +153,7 @@ if __name__ == "__main__":
     parser.add_argument('--sims', type=int, default=1000, help='MCTS simulations per move')
     parser.add_argument('--cpuct', type=float, default=1.0, help='PUCT exploration constant')
     parser.add_argument('--workers', type=int, default=None, help='Number of parallel workers (default: cpu_count)')
-    
+
     args = parser.parse_args()
-    
+
     evaluate(args.cp1, args.cp2, num_games=args.games, mcts_sims=args.sims, cpuct=args.cpuct, num_workers=args.workers)

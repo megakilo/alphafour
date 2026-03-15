@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from tqdm import tqdm
+from .checkpoint import load_checkpoint
 from .mcts import MCTS
 import multiprocessing as mp
 
@@ -59,9 +60,9 @@ class Trainer:
 
             action = np.random.choice(len(pi), p=pi)
             board = self.game.get_next_state(board, cur_player, action)
-            
+
             r = self.game.get_game_ended(board, cur_player, action)
-            
+
             if r != 0:
                 return [(x[0], x[2], r * ((-1) ** (x[1] != cur_player))) for x in train_examples]
 
@@ -84,19 +85,19 @@ class Trainer:
         iteration. After every iteration, it trains the network.
         """
         from collections import deque
-        
+
         num_workers = self.args.get('num_workers', os.cpu_count())
         replay_buffer_iters = self.args.get('replay_buffer_iters', 5)
         # Sliding window of training examples from recent iterations
         replay_buffer = deque(maxlen=replay_buffer_iters)
-        
+
         for i in range(start_iter, self.args['num_iters'] + 1):
             print(f'------ITER {i}------')
             iter_examples = []
-            
+
             self.model.eval()
             model_state_dict = {k: v.cpu() for k, v in self.model.state_dict().items()}
-            
+
             episodes_to_run = self.args['num_eps']
             worker_args = [(self.game, model_state_dict, self.args)] * episodes_to_run
 
@@ -106,10 +107,10 @@ class Trainer:
                     iter_examples.extend(episode_data)
                     pbar.update(1)
                 pbar.close()
-            
+
             # Add this iteration's data to the replay buffer
             replay_buffer.append(iter_examples)
-            
+
             # Train on all examples in the replay buffer
             train_examples = []
             for examples in replay_buffer:
@@ -117,11 +118,11 @@ class Trainer:
             print(f'Training on {len(train_examples)} examples from {len(replay_buffer)} iteration(s)')
             np.random.shuffle(train_examples)
             self.train(train_examples)
-            
+
             # Step LR scheduler (per iteration)
             self.scheduler.step()
             print(f'LR: {self.scheduler.get_last_lr()[0]:.6f}')
-            
+
             # Save checkpoint
             self.save_checkpoint(folder=self.args['checkpoint'], filename=f'checkpoint_{i}.pth.tar')
 
@@ -130,26 +131,26 @@ class Trainer:
         Trains the neural network using the examples from self-play.
         """
         batch_size = self.args['batch_size']
-        
+
         # Pre-encode all boards once before the training loop
         from .model import AlphaZeroNet
         all_boards = np.array([AlphaZeroNet.encode_board(ex[0]) for ex in examples])
         all_pis = np.array([ex[1] for ex in examples])
         all_vs = np.array([ex[2] for ex in examples])
-        
+
         dataset = torch.utils.data.TensorDataset(
             torch.tensor(all_boards, dtype=torch.float32),
             torch.tensor(all_pis, dtype=torch.float32),
             torch.tensor(all_vs, dtype=torch.float32),
         )
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        
+
         for epoch in range(self.args['epochs']):
             print(f'EPOCH ::: {epoch+1}')
             self.model.train()
-            
+
             pbar = tqdm(loader, desc="Training")
-            
+
             for batch_boards, batch_pis, batch_vs in pbar:
                 boards = batch_boards.to(self.model.device, non_blocking=True)
                 target_pis = batch_pis.to(self.model.device, non_blocking=True)
@@ -157,7 +158,7 @@ class Trainer:
 
                 # predict
                 out_pi, out_v = self.model(boards)
-                
+
                 # loss
                 l_pi = self.loss_pi(target_pis, out_pi)
                 l_v = self.loss_v(target_vs, out_v)
@@ -168,7 +169,7 @@ class Trainer:
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
-                
+
                 pbar.set_postfix({'loss_pi': l_pi.item(), 'loss_v': l_v.item()})
 
     def loss_pi(self, targets, outputs):
@@ -193,7 +194,7 @@ class Trainer:
         filepath = os.path.join(folder, filename)
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"No checkpoint found at {filepath}")
-        checkpoint = torch.load(filepath, map_location=self.model.device)
+        checkpoint = load_checkpoint(filepath, map_location=self.model.device, allow_unsafe_fallback=True)
         self.model.load_state_dict(checkpoint['state_dict'])
         if 'optimizer' in checkpoint:
             self.optimizer.load_state_dict(checkpoint['optimizer'])
