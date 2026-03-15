@@ -26,6 +26,7 @@ def play(checkpoint_path, cpuct=1.0):
 
     board = game.get_initial_state()
     cur_player = 1  # 1 for Human, -1 for AI (or vice-versa)
+    last_action = None
 
     print("\n--- Connect Four vs AlphaZero ---")
     print("Human: X, AI: O")
@@ -52,11 +53,12 @@ def play(checkpoint_path, cpuct=1.0):
             print("AI is thinking...")
             canonical_board = game.get_canonical_form(board, cur_player)
             # Use temp=0 for the best move in competitive play
-            probs = mcts.get_action_prob(canonical_board, temp=0)
+            probs = mcts.get_action_prob(canonical_board, temp=0, last_action=last_action)
             action = np.argmax(probs)
             print(f"AI chose column: {action}")
 
         board = game.get_next_state(board, cur_player, action)
+        last_action = action
 
         result = game.get_game_ended(board, cur_player, action)
         if result != 0:

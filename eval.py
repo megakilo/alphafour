@@ -19,14 +19,20 @@ def play_game(game, mcts1, mcts2):
     board = game.get_initial_state()
     cur_player = 1
     players = {1: mcts1, -1: mcts2}
+    last_action = None
 
     while True:
         canonical_board = game.get_canonical_form(board, cur_player)
         # Use temp=0 for purely competitive play (best move)
-        probs = players[cur_player].get_action_prob(canonical_board, temp=0)
+        probs = players[cur_player].get_action_prob(
+            canonical_board,
+            temp=0,
+            last_action=last_action,
+        )
         action = np.argmax(probs)
 
         board = game.get_next_state(board, cur_player, action)
+        last_action = action
 
         result = game.get_game_ended(board, cur_player, action)
         if result != 0:

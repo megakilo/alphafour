@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+
 class ResBlock(nn.Module):
     def __init__(self, num_hidden):
         super().__init__()
@@ -19,6 +20,7 @@ class ResBlock(nn.Module):
         x = F.relu(x)
         return x
 
+
 class AlphaZeroNet(nn.Module):
     def __init__(self, game, num_resBlocks=5, num_hidden=128):
         super().__init__()
@@ -31,7 +33,7 @@ class AlphaZeroNet(nn.Module):
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
-        
+
         # 2-channel input: (current player's pieces, opponent's pieces)
         self.num_input_channels = 2
         self.startBlock = nn.Sequential(
@@ -39,11 +41,11 @@ class AlphaZeroNet(nn.Module):
             nn.BatchNorm2d(num_hidden),
             nn.ReLU()
         )
-        
+
         self.backBone = nn.ModuleList(
             [ResBlock(num_hidden) for i in range(num_resBlocks)]
         )
-        
+
         self.policyHead = nn.Sequential(
             nn.Conv2d(num_hidden, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
@@ -51,7 +53,7 @@ class AlphaZeroNet(nn.Module):
             nn.Flatten(),
             nn.Linear(32 * game.rows * game.cols, self.action_size)
         )
-        
+
         self.valueHead = nn.Sequential(
             nn.Conv2d(num_hidden, 1, kernel_size=1),
             nn.BatchNorm2d(1),
@@ -62,7 +64,7 @@ class AlphaZeroNet(nn.Module):
             nn.Linear(128, 1),
             nn.Tanh()
         )
-        
+
         self.to(self.device)
 
     def get_num_parameters(self):
@@ -72,13 +74,9 @@ class AlphaZeroNet(nn.Module):
         x = self.startBlock(x)
         for resBlock in self.backBone:
             x = resBlock(x)
-            
+
         policy = self.policyHead(x)
         value = self.valueHead(x)
-        
-        # Policy is logits, will use CrossEntropyLoss which expects logits.
-        # But for MCTS we need probabilities. So we return logits here and apply softmax in predict.
-        # Wait, the prompt says "CrossEntropyLoss expects logits". Let's return logits and value.
         return policy, value
 
     @staticmethod
@@ -94,28 +92,43 @@ class AlphaZeroNet(nn.Module):
         opponent = (board == -1).astype(np.float32)
         return np.stack([current, opponent], axis=0)
 
+    @staticmethod
+    def encode_boards(boards):
+        boards = np.asarray(boards, dtype=np.int8)
+        current = (boards == 1).astype(np.float32)
+        opponent = (boards == -1).astype(np.float32)
+        return np.stack([current, opponent], axis=1)
+
     def predict(self, board):
         """
         Takes a single board (2D numpy array), runs it through the network,
         and returns policy (probabilities) and value.
         """
-        # Encode as 2-channel input
-        encoded = self.encode_board(board)
-        board_tensor = torch.tensor(encoded, dtype=torch.float32, device=self.device).unsqueeze(0)
-        
+        policies, values = self.predict_batch([board])
+        return policies[0], values[0]
+
+    def predict_batch(self, boards):
+        """
+        Runs a batch of canonical boards through the network and returns
+        masked policy probabilities plus scalar values.
+        """
+        encoded = self.encode_boards(boards)
+        valid_moves = np.asarray([board[0] == 0 for board in boards], dtype=np.bool_)
+        board_tensor = torch.as_tensor(encoded, dtype=torch.float32, device=self.device)
+
         self.eval()
-        with torch.no_grad():
-            policy_logits, value = self(board_tensor)
-            
-            # Mask invalid moves before softmax so all probability
-            # mass is concentrated on legal actions
-            valid_moves = torch.tensor(
-                (board[0] == 0).astype(np.float32), device=self.device
+        with torch.inference_mode():
+            policy_logits, values = self(board_tensor)
+            policy_logits = policy_logits.masked_fill(
+                ~torch.as_tensor(valid_moves, device=self.device),
+                float("-inf"),
             )
-            policy_logits = policy_logits.squeeze(0)
-            policy_logits[valid_moves == 0] = -float('inf')
-            
-            policy = torch.softmax(policy_logits, dim=0).cpu().numpy()
-            value = value.squeeze(0).cpu().item()
-            
-        return policy, value
+            policy = torch.softmax(policy_logits, dim=1)
+
+            # Terminal boards should not be sent here, but guard against it so
+            # callers never receive NaNs if the mask removes every action.
+            invalid_rows = torch.isnan(policy).any(dim=1)
+            if invalid_rows.any():
+                policy[invalid_rows] = 0.0
+
+        return policy.cpu().numpy(), values.squeeze(1).cpu().numpy()
