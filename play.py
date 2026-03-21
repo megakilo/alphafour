@@ -73,24 +73,30 @@ def display_hints(mcts: MCTS, game: ConnectFour) -> None:
     values = mcts.get_move_values(game)
     valid = game.get_valid_moves()
 
+    # Column labels (matching board grid alignment)
+    col_line = "  "
+    for col in range(COLS):
+        col_line += f"  {BOLD}{col + 1}{RESET} "
+
+    # Win% values (aligned to same 4-char cells)
     hint_line = "  "
     for col in range(COLS):
         if valid[col] and col in values:
             pct = values[col]
-            # Color based on win probability
             if pct >= 60:
                 color = GREEN
             elif pct >= 40:
                 color = YELLOW
             else:
                 color = RED
-            hint_line += f"{color}{pct:3.0f}{RESET} "
+            hint_line += f"{color}{pct:4.0f}{RESET}"
         elif not valid[col]:
-            hint_line += f"{DIM}  ×{RESET} "
+            hint_line += f"{DIM}   ×{RESET}"
         else:
-            hint_line += "  ? "
+            hint_line += "   ?"
 
-    print(f"{DIM}  Win%:{RESET}")
+    print(f"\n{DIM}  Win%:{RESET}")
+    print(col_line)
     print(hint_line)
 
 

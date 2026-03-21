@@ -148,6 +148,11 @@ class ConnectFour:
 
         Uses ANSI colors: Red (●) for player 1, Yellow (●) for player -1.
         Last move is highlighted with a red background.
+        Grid style:
+            1   2   3   4   5   6   7
+          +---+---+---+---+---+---+---+
+          | · | · | · | · | · | · | · |
+          +---+---+---+---+---+---+---+
         """
         RED = "\033[91m"
         YELLOW = "\033[93m"
@@ -157,18 +162,21 @@ class ConnectFour:
         DIM = "\033[2m"
 
         lines: list[str] = []
+        separator = "  " + "+---" * COLS + "+"
 
-        # Column numbers header
+        # Column numbers header (centered over each cell)
         if show_col_numbers:
-            header = "  " + "   ".join(f"{BOLD}{c + 1}{RESET}" for c in range(COLS))
+            header = "  "
+            for c in range(COLS):
+                header += f"  {BOLD}{c + 1}{RESET} "
             lines.append(header)
 
         # Top border
-        lines.append("  " + "───" * COLS + "─")
+        lines.append(separator)
 
         # Board rows (top to bottom visually = high row index to low)
         for row in range(ROWS - 1, -1, -1):
-            row_str = "│"
+            row_str = "  "
             for col in range(COLS):
                 piece = self.board[row, col]
                 is_last = (
@@ -185,16 +193,13 @@ class ConnectFour:
                     symbol = f"{DIM}·{RESET}"
 
                 if is_last and piece != 0:
-                    cell = f"{RED_BG} {symbol}{RED_BG} {RESET}"
+                    row_str += f"|{RED_BG} {symbol}{RED_BG} {RESET}"
                 else:
-                    cell = f" {symbol} "
+                    row_str += f"| {symbol} "
 
-                row_str += cell
-            row_str += "│"
+            row_str += "|"
             lines.append(row_str)
-
-        # Bottom border
-        lines.append("  " + "═══" * COLS + "═")
+            lines.append(separator)
 
         return "\n".join(lines)
 
