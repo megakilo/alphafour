@@ -50,12 +50,12 @@ def parse_args() -> argparse.Namespace:
         help="MCTS simulations per move (default: 200)",
     )
     parser.add_argument(
-        "--epochs", type=int, default=10,
-        help="Training epochs per iteration (default: 10)",
+        "--epochs", type=int, default=4,
+        help="Training epochs per iteration (default: 4)",
     )
     parser.add_argument(
-        "--batches-per-epoch", type=int, default=100,
-        help="Mini-batches per training epoch (default: 100)",
+        "--batches-per-epoch", type=int, default=None,
+        help="Mini-batches per epoch (default: auto-scale to buffer size)",
     )
     parser.add_argument(
         "--batch-size", type=int, default=256,
@@ -182,7 +182,8 @@ def main() -> None:
               f"(buffer: {len(replay_buffer)})")
 
         # ── Training phase ──
-        print(f"  🧠 Training: {args.epochs} epochs × {args.batches_per_epoch} batches ...")
+        batches_per_epoch = args.batches_per_epoch or max(1, len(replay_buffer) // args.batch_size)
+        print(f"  🧠 Training: {args.epochs} epochs × {batches_per_epoch} batches ...")
         model.to(device)
 
         train_start = time.time()

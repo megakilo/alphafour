@@ -73,9 +73,14 @@ class Trainer:
         )
 
     def train_epoch(
-        self, replay_buffer: ReplayBuffer, num_batches: int = 100
+        self, replay_buffer: ReplayBuffer, num_batches: int | None = None
     ) -> dict[str, float]:
         """Train for one epoch (multiple mini-batches).
+
+        Args:
+            replay_buffer: Source of training data.
+            num_batches: Number of mini-batches per epoch. If None, auto-scales
+                to see each example roughly once (buffer_size // batch_size).
 
         Returns:
             Dict with 'policy_loss', 'value_loss', 'total_loss'.
@@ -85,10 +90,16 @@ class Trainer:
         total_value_loss = 0.0
         actual_batches = 0
 
-        for _ in range(num_batches):
-            if len(replay_buffer) < self.batch_size:
-                break
+        if len(replay_buffer) < 2:
+            return {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
 
+        effective_batch_size = min(self.batch_size, len(replay_buffer))
+
+        # Auto-scale: each epoch sees each example ~once
+        if num_batches is None:
+            num_batches = max(1, len(replay_buffer) // effective_batch_size)
+
+        for _ in range(num_batches):
             states, target_policies, target_values = replay_buffer.sample(
                 self.batch_size
             )

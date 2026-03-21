@@ -52,10 +52,15 @@ class MCTSNode:
         return self.total_value / self.visit_count
 
     def ucb_score(self, c_puct: float = 1.5) -> float:
-        """Upper Confidence Bound score using PUCT formula."""
+        """Upper Confidence Bound score using PUCT formula.
+
+        Q-value is negated because each child stores value from its own
+        current player's perspective (the opponent of the selecting parent).
+        The parent wants to maximize its own value = minimize child's value.
+        """
         parent_visits = self.parent.visit_count if self.parent else 1
         exploration = c_puct * self.prior * math.sqrt(parent_visits) / (1 + self.visit_count)
-        return self.q_value + exploration
+        return -self.q_value + exploration
 
     def select_child(self, c_puct: float = 1.5) -> MCTSNode:
         """Select child with highest UCB score."""
@@ -227,20 +232,13 @@ class MCTS:
 
         Returns dict mapping column -> estimated win probability (0-100%).
         """
-        visit_counts = self.search(game, add_noise=False)
-
+        # Run a full search and build the tree
         root = MCTSNode(game)
         policy, _ = self._evaluate(game)
         root.expand(policy)
 
-        # Re-run a fresh search to get Q-values
-        # Actually, let's just build the tree properly
-        root2 = MCTSNode(game)
-        policy, _ = self._evaluate(game)
-        root2.expand(policy)
-
         for _ in range(self.num_simulations):
-            node = root2
+            node = root
             while node.is_expanded and node.children:
                 node = node.select_child(self.c_puct)
             result = node.game.get_result()
@@ -252,9 +250,9 @@ class MCTS:
             node.backpropagate(v)
 
         values = {}
-        for action, child in root2.children.items():
-            # Q-value is from child's perspective (opponent),
-            # so negate to get from current player's perspective
+        for action, child in root.children.items():
+            # Child Q-value is from child's perspective (opponent).
+            # Negate to get value from current player's perspective.
             win_prob = (-child.q_value + 1) / 2 * 100  # Convert [-1,1] to [0,100]%
             values[action] = win_prob
 

@@ -147,7 +147,7 @@ class ConnectFour:
         """Return a string representation of the board for console display.
 
         Uses ANSI colors: Red (●) for player 1, Yellow (●) for player -1.
-        Last move is highlighted with a red background.
+        Last move is highlighted with a blue background.
         Grid style:
             1   2   3   4   5   6   7
           +---+---+---+---+---+---+---+
@@ -156,7 +156,7 @@ class ConnectFour:
         """
         RED = "\033[91m"
         YELLOW = "\033[93m"
-        RED_BG = "\033[41m"
+        BLUE_BG = "\033[44m"
         RESET = "\033[0m"
         BOLD = "\033[1m"
         DIM = "\033[2m"
@@ -193,7 +193,7 @@ class ConnectFour:
                     symbol = f"{DIM}·{RESET}"
 
                 if is_last and piece != 0:
-                    row_str += f"|{RED_BG} {symbol}{RED_BG} {RESET}"
+                    row_str += f"|{BLUE_BG} {symbol}{BLUE_BG} {RESET}"
                 else:
                     row_str += f"| {symbol} "
 
