@@ -65,6 +65,26 @@ uv run play.py --checkpoint checkpoints/checkpoint_0050.pt
 
 The board is drawn in the console with colored pieces (Red ● / Yellow ●) and the last move highlighted. Enter a column number (1-7) to play, or `q` to quit.
 
+## Benchmarking
+
+Evaluate checkpoint quality against the [gamesolver.org test suite](http://blog.gamesolver.org/solving-connect-four/02-test-protocol/) (6000 positions across 6 difficulty levels):
+
+```bash
+# Run all test files against latest checkpoint
+uv run benchmark.py
+
+# Specific test file with verbose per-position output
+uv run benchmark.py --test-files testdata/Test_L3_R1 -v
+
+# Quick check: first 100 positions, stronger search
+uv run benchmark.py --limit 100 --simulations 800
+
+# Benchmark a specific checkpoint
+uv run benchmark.py --checkpoint checkpoints/checkpoint_0050.pt
+```
+
+Reports **sign accuracy** (win/draw/loss classification) since the value head outputs a continuous score rather than exact move counts. Results are broken down per test file and by outcome category.
+
 ## Architecture
 
 ```
@@ -82,7 +102,9 @@ Input (3×6×7) → Conv Block → 10 Residual Blocks → ┬→ Policy Head →
 ```
 ├── main.py              # Training entry point
 ├── play.py              # Human vs AI game
+├── benchmark.py         # Checkpoint evaluation against test suite
 ├── checkpoints/         # Saved model checkpoints
+├── testdata/            # gamesolver.org test positions (Test_L*_R*)
 └── src/
     ├── game.py          # Connect Four game engine
     ├── model.py         # AlphaZero neural network
