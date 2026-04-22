@@ -11,6 +11,8 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from .model import AlphaZeroNet
+from .game import ROWS
+
 
 
 class ReplayBuffer:
@@ -112,8 +114,15 @@ class Trainer:
             policy_logits, pred_values = self.model(states_t)
             pred_values = pred_values.squeeze(1)
 
+            # Mask invalid moves (Issue 1 Fix)
+            occupied = states_t[:, 0] + states_t[:, 1]
+            heights = occupied.sum(dim=1)
+            valid_moves = heights < ROWS
+            policy_logits = policy_logits.masked_fill(~valid_moves, -1e9)
+
             # Policy loss: cross-entropy with MCTS policy
             log_probs = F.log_softmax(policy_logits, dim=1)
+
             policy_loss = -torch.sum(target_policies_t * log_probs, dim=1).mean()
 
             # Value loss: MSE
