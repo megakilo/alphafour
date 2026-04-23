@@ -59,11 +59,11 @@ class AlphaZeroNet(nn.Module):
 
         # Policy head
         self.policy_head = nn.Sequential(
-            nn.Conv2d(num_filters, 32, 1, bias=False),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(num_filters, 2, 1, bias=False),
+            nn.BatchNorm2d(2),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(32 * ROWS * COLS, COLS),
+            nn.Linear(2 * ROWS * COLS, COLS),
         )
 
         # Value head
