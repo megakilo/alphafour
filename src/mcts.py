@@ -60,7 +60,9 @@ class MCTSNode:
         """
         parent_visits = self.parent.visit_count if self.parent else 1
         parent_visits = max(1, parent_visits)
-        exploration = c_puct * self.prior * math.sqrt(parent_visits) / (1 + self.visit_count)
+        exploration = (
+            c_puct * self.prior * math.sqrt(parent_visits) / (1 + self.visit_count)
+        )
         return -self.q_value + exploration
 
     def select_child(self, c_puct: float = 1.5) -> MCTSNode:
@@ -132,9 +134,7 @@ class MCTS:
         policy, value = self.model.predict(state, valid_moves)
         return policy.cpu().numpy(), value.item()
 
-    def search(
-        self, game: ConnectFour, add_noise: bool = True
-    ) -> np.ndarray:
+    def search(self, game: ConnectFour, add_noise: bool = True) -> np.ndarray:
         """Run MCTS from the given game state.
 
         Args:
@@ -152,14 +152,11 @@ class MCTS:
 
         # Add Dirichlet noise at root for exploration
         if add_noise and root.children:
-            noise = np.random.dirichlet(
-                [self.dirichlet_alpha] * len(root.children)
-            )
+            noise = np.random.dirichlet([self.dirichlet_alpha] * len(root.children))
             for i, child in enumerate(root.children.values()):
                 child.prior = (
-                    (1 - self.dirichlet_epsilon) * child.prior
-                    + self.dirichlet_epsilon * noise[i]
-                )
+                    1 - self.dirichlet_epsilon
+                ) * child.prior + self.dirichlet_epsilon * noise[i]
 
         # Run simulations
         for _ in range(self.num_simulations):

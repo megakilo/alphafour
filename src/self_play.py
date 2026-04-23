@@ -49,7 +49,9 @@ def play_batched_games(
     # Initial evaluate and expand roots
     with torch.no_grad():
         states = torch.from_numpy(np.array([g.encode() for g in games])).to(device)
-        valid_moves = torch.from_numpy(np.array([g.get_valid_moves() for g in games])).to(device)
+        valid_moves = torch.from_numpy(
+            np.array([g.get_valid_moves() for g in games])
+        ).to(device)
         policies, values = model.predict(states, valid_moves)
         policies = policies.cpu().numpy()
 
@@ -57,7 +59,7 @@ def play_batched_games(
         root.expand(policies[i])
 
     all_examples: list[tuple[np.ndarray, np.ndarray, float]] = []
-    
+
     pbar = tqdm(total=num_games, desc="    Self-play", unit="game")
 
     while active_indices:
@@ -68,9 +70,8 @@ def play_batched_games(
                 noise = np.random.dirichlet([dirichlet_alpha] * len(root.children))
                 for idx, child in enumerate(root.children.values()):
                     child.prior = (
-                        (1 - dirichlet_epsilon) * child.prior
-                        + dirichlet_epsilon * noise[idx]
-                    )
+                        1 - dirichlet_epsilon
+                    ) * child.prior + dirichlet_epsilon * noise[idx]
 
         # MCTS Simulations
         for _ in range(num_simulations):
@@ -93,7 +94,9 @@ def play_batched_games(
                 with torch.no_grad():
                     states_t = torch.from_numpy(np.stack(leaves_to_eval)).to(device)
                     val_moves_t = torch.from_numpy(
-                        np.array([node.game.get_valid_moves() for _, node in eval_indices])
+                        np.array(
+                            [node.game.get_valid_moves() for _, node in eval_indices]
+                        )
                     ).to(device)
                     policies, values = model.predict(states_t, val_moves_t)
                     policies = policies.cpu().numpy()
@@ -148,7 +151,7 @@ def play_batched_games(
                     else:
                         val = -result
                     all_examples.append((encoded, policy, val))
-                
+
                 pbar.update(1)
             else:
                 new_active.append(i)
@@ -184,8 +187,7 @@ def run_self_play(
     dirichlet_alpha: float = 1.0,
     dirichlet_epsilon: float = 0.25,
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
-    """Run self-play games using Batched MCTS.
-    """
+    """Run self-play games using Batched MCTS."""
     examples = play_batched_games(
         model=model,
         num_games=num_games,

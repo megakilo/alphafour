@@ -38,31 +38,43 @@ BLUE = "\033[94m"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Play Connect Four vs AlphaZero AI")
     parser.add_argument(
-        "--computer-first", action="store_true",
+        "--computer-first",
+        action="store_true",
         help="Let the computer make the first move",
     )
     parser.add_argument(
-        "--hints", action="store_true",
+        "--hints",
+        action="store_true",
         help="Show win probability for each column",
     )
     parser.add_argument(
-        "--checkpoint", type=str, default=None,
+        "--checkpoint",
+        type=str,
+        default=None,
         help="Path to model checkpoint (default: latest in checkpoints/)",
     )
     parser.add_argument(
-        "--checkpoint-dir", type=str, default="checkpoints",
+        "--checkpoint-dir",
+        type=str,
+        default="checkpoints",
         help="Directory to search for checkpoints (default: checkpoints/)",
     )
     parser.add_argument(
-        "--simulations", type=int, default=800,
+        "--simulations",
+        type=int,
+        default=800,
         help="MCTS simulations per move (default: 800, higher = stronger)",
     )
     parser.add_argument(
-        "--res-blocks", type=int, default=10,
+        "--res-blocks",
+        type=int,
+        default=10,
         help="Number of residual blocks in model (default: 10)",
     )
     parser.add_argument(
-        "--filters", type=int, default=128,
+        "--filters",
+        type=int,
+        default=128,
         help="Number of convolutional filters (default: 128)",
     )
     return parser.parse_args()
@@ -107,14 +119,18 @@ def get_human_move(game: ConnectFour) -> int:
 
     while True:
         try:
-            inp = input(f"\n{BOLD}Your move (column {', '.join(valid_cols)}): {RESET}").strip()
+            inp = input(
+                f"\n{BOLD}Your move (column {', '.join(valid_cols)}): {RESET}"
+            ).strip()
             if inp.lower() in ("q", "quit", "exit"):
                 print("\nGoodbye! 👋")
                 sys.exit(0)
             col = int(inp) - 1  # Convert to 0-indexed
             if 0 <= col < COLS and valid[col]:
                 return col
-            print(f"{RED}Invalid move. Choose from columns: {', '.join(valid_cols)}{RESET}")
+            print(
+                f"{RED}Invalid move. Choose from columns: {', '.join(valid_cols)}{RESET}"
+            )
         except ValueError:
             print(f"{RED}Please enter a number (1-{COLS}) or 'q' to quit.{RESET}")
         except (EOFError, KeyboardInterrupt):
@@ -133,8 +149,10 @@ def get_ai_move(mcts: MCTS, game: ConnectFour) -> int:
     total_visits = int(visit_counts.sum())
     top_visits = int(visit_counts[action])
     confidence = top_visits / total_visits * 100 if total_visits > 0 else 0
-    print(f"  {DIM}AI plays column {action + 1} "
-          f"({top_visits}/{total_visits} visits, {confidence:.0f}% confident){RESET}")
+    print(
+        f"  {DIM}AI plays column {action + 1} "
+        f"({top_visits}/{total_visits} visits, {confidence:.0f}% confident){RESET}"
+    )
 
     return action
 
@@ -171,9 +189,9 @@ def main() -> None:
     print(f"  {DIM}Device: {device}{RESET}")
     print(f"  {DIM}MCTS simulations: {args.simulations}{RESET}")
 
-    model = AlphaZeroNet(
-        num_res_blocks=args.res_blocks, num_filters=args.filters
-    ).to(device)
+    model = AlphaZeroNet(num_res_blocks=args.res_blocks, num_filters=args.filters).to(
+        device
+    )
 
     # Load weights (support both full checkpoint and model-only saves)
     checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)

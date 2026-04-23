@@ -14,12 +14,13 @@ from .model import AlphaZeroNet
 from .game import ROWS
 
 
-
 class ReplayBuffer:
     """Fixed-size replay buffer for training examples."""
 
     def __init__(self, capacity: int = 200_000) -> None:
-        self.buffer: deque[tuple[np.ndarray, np.ndarray, float]] = deque(maxlen=capacity)
+        self.buffer: deque[tuple[np.ndarray, np.ndarray, float]] = deque(
+            maxlen=capacity
+        )
 
     def add(self, examples: list[tuple[np.ndarray, np.ndarray, float]]) -> None:
         """Add a batch of examples."""

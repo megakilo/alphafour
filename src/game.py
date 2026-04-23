@@ -143,7 +143,9 @@ class ConnectFour:
         g._move_count = self._move_count
         return g
 
-    def display(self, show_col_numbers: bool = True, last_move_highlight: bool = True) -> str:
+    def display(
+        self, show_col_numbers: bool = True, last_move_highlight: bool = True
+    ) -> str:
         """Return a string representation of the board for console display.
 
         Uses ANSI colors: Red (●) for player 1, Yellow (●) for player -1.
@@ -204,4 +206,6 @@ class ConnectFour:
         return "\n".join(lines)
 
     def __repr__(self) -> str:
-        return f"ConnectFour(move_count={self._move_count}, player={self.current_player})"
+        return (
+            f"ConnectFour(move_count={self._move_count}, player={self.current_player})"
+        )
