@@ -245,7 +245,9 @@ def main() -> None:
             for file_path in sorted(testdata_dir.glob("Test_*")):
                 with open(file_path, "r") as f:
                     lines = f.readlines()
-                acc = evaluate_dataset(model, device, lines)
+                acc = evaluate_dataset(
+                    model, device, lines, num_simulations=args.simulations
+                )
                 dataset_accuracies[file_path.name] = acc
 
         if dataset_accuracies:

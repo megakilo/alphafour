@@ -31,13 +31,19 @@ def evaluate_opening_move(
 
 
 def evaluate_dataset(
-    model: AlphaZeroNet, device: torch.device, lines: list[str]
+    model: AlphaZeroNet,
+    device: torch.device,
+    lines: list[str],
+    num_simulations: int = 0,
 ) -> float:
     """Evaluate model value accuracy against a single dataset.
 
     lines should be a list of strings following the protocol:
     [Moves string] [Score]
     where score > 0 is a win, score < 0 is a loss, and score == 0 is a draw.
+
+    If num_simulations > 0, evaluates the dataset using Batched MCTS.
+    Otherwise, evaluates using raw network predictions.
 
     Returns:
         Accuracy percentage.
@@ -48,10 +54,11 @@ def evaluate_dataset(
     total = 0
 
     batch_states = []
+    batch_games = []
     batch_scores = []
     batch_size = 1024
 
-    def evaluate_batch(states: list[np.ndarray], scores: list[int]) -> None:
+    def evaluate_batch_raw(states: list[np.ndarray], scores: list[int]) -> None:
         nonlocal correct, total
         if not states:
             return
@@ -70,6 +77,69 @@ def evaluate_dataset(
                 correct += 1
         total += len(scores)
 
+    def evaluate_batch_mcts(games: list[ConnectFour], scores: list[int]) -> None:
+        nonlocal correct, total
+        if not games:
+            return
+
+        roots = [MCTSNode(g) for g in games]
+        
+        # Initial evaluate for roots
+        states_t = torch.from_numpy(np.array([g.encode() for g in games])).to(device)
+        val_moves_t = torch.from_numpy(
+            np.array([g.get_valid_moves() for g in games])
+        ).to(device)
+
+        with torch.no_grad():
+            policies, _ = model.predict(states_t, val_moves_t)
+            policies = policies.cpu().numpy()
+
+        for i, root in enumerate(roots):
+            root.expand(policies[i])
+
+        for _ in range(num_simulations):
+            leaves_to_eval = []
+            eval_indices = []
+
+            for i, root in enumerate(roots):
+                node = root
+                while node.is_expanded and node.children:
+                    node = node.select_child(1.5)
+
+                result = node.game.get_result()
+                if result is not None:
+                    node.backpropagate(result)
+                else:
+                    leaves_to_eval.append(node.game.encode())
+                    eval_indices.append((i, node))
+
+            if leaves_to_eval:
+                with torch.no_grad():
+                    states_t = torch.from_numpy(np.stack(leaves_to_eval)).to(device)
+                    val_moves_t = torch.from_numpy(
+                        np.array([n.game.get_valid_moves() for _, n in eval_indices])
+                    ).to(device)
+                    pols, vals = model.predict(states_t, val_moves_t)
+                    pols = pols.cpu().numpy()
+                    vals = vals.cpu().numpy()
+
+                for idx, (i, node) in enumerate(eval_indices):
+                    node.expand(pols[idx])
+                    node.backpropagate(vals[idx].item())
+
+        for i, root in enumerate(roots):
+            pred_val = root.q_value
+            true_score = scores[i]
+            
+            if true_score > 0 and pred_val > 0.05:
+                correct += 1
+            elif true_score < 0 and pred_val < -0.05:
+                correct += 1
+            elif true_score == 0 and -0.05 <= pred_val <= 0.05:
+                correct += 1
+        
+        total += len(scores)
+
     for line in lines:
         parts = line.strip().split()
         if len(parts) != 2:
@@ -82,16 +152,26 @@ def evaluate_dataset(
             col = int(move_char) - 1
             game.make_move(col)
 
-        batch_states.append(game.encode())
+        if num_simulations > 0:
+            batch_games.append(game)
+        else:
+            batch_states.append(game.encode())
+            
         batch_scores.append(score)
 
-        if len(batch_states) >= batch_size:
-            evaluate_batch(batch_states, batch_scores)
+        if num_simulations > 0 and len(batch_games) >= batch_size:
+            evaluate_batch_mcts(batch_games, batch_scores)
+            batch_games = []
+            batch_scores = []
+        elif num_simulations == 0 and len(batch_states) >= batch_size:
+            evaluate_batch_raw(batch_states, batch_scores)
             batch_states = []
             batch_scores = []
 
-    if batch_states:
-        evaluate_batch(batch_states, batch_scores)
+    if num_simulations > 0 and batch_games:
+        evaluate_batch_mcts(batch_games, batch_scores)
+    elif num_simulations == 0 and batch_states:
+        evaluate_batch_raw(batch_states, batch_scores)
 
     if total > 0:
         return (correct / total) * 100
