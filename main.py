@@ -76,11 +76,7 @@ def parse_args() -> argparse.Namespace:
         help="Number of convolutional filters (default: 128)",
     )
 
-    # Workers
-    parser.add_argument(
-        "--workers", type=int, default=None,
-        help="Number of self-play workers (default: CPU count - 1)",
-    )
+
 
     # Checkpoints
     parser.add_argument(
@@ -151,8 +147,7 @@ def main() -> None:
             print(f"   Resumed at iteration {start_iteration}, buffer size: {len(replay_buffer)}")
     print()
 
-    # Temporary model path for workers
-    worker_model_path = checkpoint_dir / "_worker_model.pt"
+
 
     # Main training loop
     for iteration in range(start_iteration, args.iterations):
@@ -164,16 +159,11 @@ def main() -> None:
         print(f"  🎲 Self-play: {args.games_per_iteration} games, {args.simulations} sims/move ...")
         model.eval()
 
-        # Save model weights for workers (always on CPU)
-        torch.save({k: v.cpu() for k, v in model.state_dict().items()}, worker_model_path)
-
         sp_start = time.time()
         examples = run_self_play(
             model=model,
             num_games=args.games_per_iteration,
             num_simulations=args.simulations,
-            num_workers=args.workers,
-            model_path=str(worker_model_path),
         )
         sp_time = time.time() - sp_start
 
@@ -222,9 +212,6 @@ def main() -> None:
         print(f"  💾 Saved: {ckpt_path} ({iter_time:.1f}s total)")
         print()
 
-    # Cleanup temp file
-    if worker_model_path.exists():
-        worker_model_path.unlink()
 
     print("✅ Training complete!")
     print(f"   Latest checkpoint: {checkpoint_dir / f'checkpoint_{args.iterations:04d}.pt'}")
