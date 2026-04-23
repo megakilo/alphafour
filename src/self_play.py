@@ -124,7 +124,12 @@ def play_batched_games(
                     valid = game.get_valid_moves().astype(np.float32)
                     action_probs = valid / valid.sum()
                 else:
-                    counts = visit_counts ** (1.0 / temperature)
+                    mask = visit_counts > 0
+                    log_counts = np.full(COLS, -np.inf)
+                    log_counts[mask] = (1.0 / temperature) * np.log(visit_counts[mask])
+                    max_log = np.max(log_counts[mask])
+                    counts = np.zeros(COLS, dtype=np.float64)
+                    counts[mask] = np.exp(log_counts[mask] - max_log)
                     action_probs = counts / counts.sum()
 
             histories[i].append((game.encode(), action_probs, game.current_player))
@@ -175,6 +180,9 @@ def run_self_play(
     model: AlphaZeroNet,
     num_games: int,
     num_simulations: int,
+    c_puct: float = 1.5,
+    dirichlet_alpha: float = 1.0,
+    dirichlet_epsilon: float = 0.25,
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
     """Run self-play games using Batched MCTS.
     """
