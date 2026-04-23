@@ -4,7 +4,7 @@ An AlphaZero-style AI for Connect Four, trained entirely through self-play. Uses
 
 ## Setup
 
-Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/):
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync

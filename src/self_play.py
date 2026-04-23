@@ -76,6 +76,9 @@ def play_single_game(
 
 def _worker_init(model_path: str, num_res_blocks: int, num_filters: int) -> None:
     """Initialize worker process with model."""
+    # Prevent CPU thread contention across multiple worker processes
+    torch.set_num_threads(1)
+
     global _worker_model
     _worker_model = AlphaZeroNet(
         num_res_blocks=num_res_blocks, num_filters=num_filters
