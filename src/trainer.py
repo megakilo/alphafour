@@ -67,7 +67,7 @@ class Trainer:
         self.model = model
         self.device = device
         self.batch_size = batch_size
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
         self.scheduler = CosineAnnealingLR(
