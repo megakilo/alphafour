@@ -12,7 +12,7 @@ from .model import AlphaZeroNet
 
 
 # Temperature schedule: use τ=1 for first N moves, then τ→0
-TEMP_THRESHOLD = 15  # After this many moves, switch to greedy
+TEMP_THRESHOLD = 20  # After this many moves, switch to greedy
 
 
 def augment_examples(
