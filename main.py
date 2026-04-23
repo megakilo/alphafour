@@ -18,12 +18,14 @@ import sys
 import time
 from pathlib import Path
 
+import copy
 import torch
 from tqdm import tqdm
 
 from src.model import AlphaZeroNet
 from src.self_play import run_self_play
 from src.trainer import ReplayBuffer, Trainer
+from src.evaluate import evaluate_dataset, evaluate_opening_move, play_batched_arena
 from src.utils import (
     get_device,
     get_latest_checkpoint,
@@ -171,6 +173,11 @@ def main() -> None:
         print(f"     Generated {len(examples)} examples in {sp_time:.1f}s "
               f"(buffer: {len(replay_buffer)})")
 
+        # Save previous model for Arena
+        previous_model = AlphaZeroNet(args.res_blocks, args.filters).to(device)
+        previous_model.load_state_dict(model.state_dict())
+        previous_model.eval()
+
         # ── Training phase ──
         batches_per_epoch = args.batches_per_epoch or max(1, len(replay_buffer) // args.batch_size)
         print(f"  🧠 Training: {args.epochs} epochs × {batches_per_epoch} batches ...")
@@ -196,6 +203,43 @@ def main() -> None:
 
         # Step LR scheduler
         trainer.step_scheduler()
+
+        # ── Evaluation phase ──
+        print(f"  📊 Evaluation ...")
+        best_move, center_pct = evaluate_opening_move(model, device, num_simulations=args.simulations)
+        status = "✅" if best_move == 3 else "❌"
+        print(f"     {status} Opening Move: played column {best_move + 1} (Center visits: {center_pct:.1f}%)")
+        
+        dataset_accuracies = {}
+        testdata_dir = Path("testdata")
+        if testdata_dir.exists():
+            for file_path in sorted(testdata_dir.glob("Test_*")):
+                with open(file_path, 'r') as f:
+                    lines = f.readlines()
+                acc = evaluate_dataset(model, device, lines)
+                dataset_accuracies[file_path.name] = acc
+                
+        if dataset_accuracies:
+            print(f"     Dataset Accuracy:")
+            for filename, acc in dataset_accuracies.items():
+                print(f"       - {filename}: {acc:.1f}%")
+
+        # ── Arena Evaluation ──
+        print(f"  ⚔️ Arena: New Model vs Previous Model (40 games) ...")
+        m1_w_p1, m1_w_p2, m2_w_p1, m2_w_p2, draws = play_batched_arena(
+            model1=model,
+            model2=previous_model,
+            device=device,
+            num_games=40,
+            num_simulations=args.simulations
+        )
+        m1_wins = m1_w_p1 + m1_w_p2
+        m2_wins = m2_w_p1 + m2_w_p2
+        win_rate = (m1_wins + 0.5 * draws) / 40 * 100
+        print(f"     Result: New Model {m1_wins} - {m2_wins} Previous Model (Draws: {draws})")
+        print(f"     Breakdown (New Model): {m1_w_p1} wins as P1, {m1_w_p2} wins as P2")
+        print(f"     Breakdown (Prev Model): {m2_w_p1} wins as P1, {m2_w_p2} wins as P2")
+        print(f"     New Model Winrate: {win_rate:.1f}%")
 
         # ── Save checkpoint ──
         ckpt_path = checkpoint_dir / f"checkpoint_{iteration + 1:04d}.pt"
