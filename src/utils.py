@@ -37,7 +37,9 @@ def save_checkpoint(
     }
     if scheduler is not None:
         data["scheduler_state_dict"] = scheduler.state_dict()
-    torch.save(data, path)
+    tmp_path = path.with_suffix(".tmp")
+    torch.save(data, tmp_path)
+    tmp_path.rename(path)
 
 
 def load_checkpoint(
