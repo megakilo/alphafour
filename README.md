@@ -113,3 +113,16 @@ Input (3×6×7) → Conv Block → 10 Residual Blocks → ┬→ Policy Head →
     ├── trainer.py       # Training loop & replay buffer
     └── utils.py         # Device detection, checkpoint I/O
 ```
+
+## Test Data
+
+- Source: [gamesolver.org](http://blog.gamesolver.org/solving-connect-four/02-test-protocol/)
+
+| Test Set (1000 test cases each) | Test Set name     | nb moves              | nb remaining moves        |
+|-----------------------------------|-------------------|-----------------------|---------------------------|
+| Test_L3_R1                        | End-Easy          | 28 < moves            | remaining < 14            |
+| Test_L2_R1                        | Middle-Easy       | 14 < moves <= 28      | remaining < 14            |
+| Test_L2_R2                        | Middle-Medium     | 14 < moves <= 28      | 14 <= remaining < 28      |
+| Test_L1_R1                        | Begin-Easy        | moves <= 14           | remaining < 14            |
+| Test_L1_R2                        | Begin-Medium      | moves <= 14           | 14 <= remaining < 28      |
+| Test_L1_R3                        | Begin-Hard        | moves <= 14           | 28 <= remaining           |
