@@ -8,7 +8,7 @@ from collections import deque
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import MultiStepLR
 
 from .model import AlphaZeroNet
 from .game import ROWS
@@ -71,8 +71,8 @@ class Trainer:
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
-        self.scheduler = CosineAnnealingLR(
-            self.optimizer, T_max=total_iterations, eta_min=lr * 0.01
+        self.scheduler = MultiStepLR(
+            self.optimizer, milestones=[50, 75], gamma=0.1
         )
 
     def train_epoch(
@@ -98,9 +98,9 @@ class Trainer:
 
         effective_batch_size = min(self.batch_size, len(replay_buffer))
 
-        # Auto-scale: each epoch sees each example ~once
+        # Auto-scale: cap at 64 batches to prevent over-training on stale data
         if num_batches is None:
-            num_batches = max(1, len(replay_buffer) // effective_batch_size)
+            num_batches = min(64, max(1, len(replay_buffer) // effective_batch_size))
 
         for _ in range(num_batches):
             states, target_policies, target_values = replay_buffer.sample(

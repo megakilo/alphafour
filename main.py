@@ -60,8 +60,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=4,
-        help="Training epochs per iteration (default: 4)",
+        default=2,
+        help="Training epochs per iteration (default: 2)",
     )
     parser.add_argument(
         "--batches-per-epoch",
@@ -113,8 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--buffer-capacity",
         type=int,
-        default=200_000,
-        help="Replay buffer capacity (default: 200000)",
+        default=50_000,
+        help="Replay buffer capacity (default: 50000)",
     )
 
     return parser.parse_args()
@@ -127,7 +127,7 @@ def main() -> None:
     print(f"   Device: {device}")
     print(f"   Iterations: {args.iterations}")
     print(f"   Games/iteration: {args.games_per_iteration}")
-    print(f"   MCTS simulations: {args.simulations}")
+    print(f"   MCTS simulations: {args.training_simulations}")
     print(f"   Model: {args.res_blocks} res blocks, {args.filters} filters")
     print()
 

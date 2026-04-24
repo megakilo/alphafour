@@ -12,7 +12,7 @@ from .model import AlphaZeroNet
 
 
 # Temperature schedule: use τ=1 for first N moves, then τ→0
-TEMP_THRESHOLD = 20  # After this many moves, switch to greedy
+TEMP_THRESHOLD = 30  # After this many moves, switch to greedy
 
 
 def augment_examples(
@@ -155,24 +155,29 @@ def play_batched_games(
                 pbar.update(1)
             else:
                 new_active.append(i)
-                # Reset root for next turn
-                roots[i] = MCTSNode(game)
+                # Reuse MCTS subtree for the chosen action
+                if action in roots[i].children:
+                    roots[i] = roots[i].children[action]
+                    roots[i].parent = None  # Detach from old tree
+                else:
+                    roots[i] = MCTSNode(game)
 
         active_indices = new_active
 
-        # Initial evaluate for new roots
-        if active_indices:
+        # Initial evaluate for new roots (skip already-expanded subtree roots)
+        needs_expand = [i for i in active_indices if not roots[i].is_expanded]
+        if needs_expand:
             with torch.no_grad():
                 states_t = torch.from_numpy(
-                    np.array([games[i].encode() for i in active_indices])
+                    np.array([games[i].encode() for i in needs_expand])
                 ).to(device)
                 val_moves_t = torch.from_numpy(
-                    np.array([games[i].get_valid_moves() for i in active_indices])
+                    np.array([games[i].get_valid_moves() for i in needs_expand])
                 ).to(device)
                 policies, values = model.predict(states_t, val_moves_t)
                 policies = policies.cpu().numpy()
 
-            for idx, i in enumerate(active_indices):
+            for idx, i in enumerate(needs_expand):
                 roots[i].expand(policies[idx])
 
     pbar.close()
