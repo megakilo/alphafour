@@ -11,7 +11,7 @@ from .model import AlphaZeroNet
 
 
 def evaluate_opening_move(
-    model: AlphaZeroNet, device: torch.device, num_simulations: int
+    model: AlphaZeroNet, device: torch.device, num_simulations: int = 0
 ) -> tuple[int, float]:
     """Evaluate the opening move for Connect Four.
 
@@ -19,13 +19,23 @@ def evaluate_opening_move(
         (best_move_column, center_column_visit_pct)
     """
     game = ConnectFour()
-    mcts = MCTS(model=model, num_simulations=num_simulations, device=device)
 
-    # Run MCTS search
-    visit_counts = mcts.search(game, add_noise=False)
+    if num_simulations > 0:
+        mcts = MCTS(model=model, num_simulations=num_simulations, device=device)
+        # Run MCTS search
+        visit_counts = mcts.search(game, add_noise=False)
+        best_move = int(np.argmax(visit_counts))
+        center_pct = float(visit_counts[3] / visit_counts.sum()) * 100
+    else:
+        model.eval()
+        state_t = torch.from_numpy(np.array([game.encode()])).to(device)
+        val_moves_t = torch.from_numpy(np.array([game.get_valid_moves()])).to(device)
+        with torch.no_grad():
+            policies, _ = model.predict(state_t, val_moves_t)
+            policies = policies[0].cpu().numpy()
 
-    best_move = int(np.argmax(visit_counts))
-    center_pct = float(visit_counts[3] / visit_counts.sum()) * 100
+        best_move = int(np.argmax(policies))
+        center_pct = float(policies[3] / policies.sum()) * 100
 
     return best_move, center_pct
 
@@ -83,7 +93,7 @@ def evaluate_dataset(
             return
 
         roots = [MCTSNode(g) for g in games]
-        
+
         # Initial evaluate for roots
         states_t = torch.from_numpy(np.array([g.encode() for g in games])).to(device)
         val_moves_t = torch.from_numpy(
@@ -130,14 +140,14 @@ def evaluate_dataset(
         for i, root in enumerate(roots):
             pred_val = root.q_value
             true_score = scores[i]
-            
+
             if true_score > 0 and pred_val > 0.05:
                 correct += 1
             elif true_score < 0 and pred_val < -0.05:
                 correct += 1
             elif true_score == 0 and -0.05 <= pred_val <= 0.05:
                 correct += 1
-        
+
         total += len(scores)
 
     for line in lines:
@@ -156,7 +166,7 @@ def evaluate_dataset(
             batch_games.append(game)
         else:
             batch_states.append(game.encode())
-            
+
         batch_scores.append(score)
 
         if num_simulations > 0 and len(batch_games) >= batch_size:
