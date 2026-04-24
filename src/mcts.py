@@ -182,8 +182,12 @@ class MCTS:
 
         # Construct action probabilities from visit counts
         visit_counts = np.zeros(COLS, dtype=np.float32)
-        for action, child in root.children.items():
-            visit_counts[action] = child.visit_count
+        if self.num_simulations == 0:
+            for action, child in root.children.items():
+                visit_counts[action] = child.prior
+        else:
+            for action, child in root.children.items():
+                visit_counts[action] = child.visit_count
 
         return visit_counts
 
@@ -234,6 +238,15 @@ class MCTS:
         root = MCTSNode(game)
         policy, _ = self._evaluate(game)
         root.expand(policy)
+
+        if self.num_simulations == 0:
+            # If 0 simulations, evaluate children directly using raw network value
+            values = {}
+            for action, child in root.children.items():
+                _, child_val = self._evaluate(child.game)
+                win_prob = (-child_val + 1) / 2 * 100
+                values[action] = win_prob
+            return values
 
         for _ in range(self.num_simulations):
             node = root
