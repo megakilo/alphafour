@@ -245,19 +245,24 @@ def main() -> None:
             f"     {status} Opening Move: played column {best_move + 1} (Center visits: {center_pct:.1f}%)"
         )
 
-        dataset_accuracies = {}
+        dataset_results = {}
         testdata_dir = Path("testdata")
         if testdata_dir.exists():
             for file_path in sorted(testdata_dir.glob("Test_*")):
                 with open(file_path, "r") as f:
                     lines = f.readlines()
-                acc = evaluate_dataset(model, device, lines)
-                dataset_accuracies[file_path.name] = acc
+                result = evaluate_dataset(model, device, lines)
+                dataset_results[file_path.name] = result
 
-        if dataset_accuracies:
-            print("     Dataset Accuracy:")
-            for filename, acc in dataset_accuracies.items():
-                print(f"       - {filename}: {acc:.1f}%")
+        if dataset_results:
+            print("     Dataset Evaluation:")
+            for filename, result in dataset_results.items():
+                print(
+                    f"       - {filename}: "
+                    f"acc={result['accuracy']:.1f}% "
+                    f"mae={result['mae']:.3f} "
+                    f"r={result['correlation']:.3f}"
+                )
 
         # ── Arena Evaluation ──
         print("  ⚔️ Arena: New Model vs Previous Model (40 games) ...")

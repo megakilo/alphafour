@@ -45,31 +45,37 @@ def evaluate_dataset(
     device: torch.device,
     lines: list[str],
     num_simulations: int = 0,
-) -> float:
+) -> dict[str, float]:
     """Evaluate model value accuracy against a single dataset.
 
-    lines should be a list of strings following the protocol:
+    lines should be a list of strings following the gamesolver.org protocol:
     [Moves string] [Score]
-    where score > 0 is a win, score < 0 is a loss, and score == 0 is a draw.
+    where score > 0 is a win for current player, < 0 is a loss, == 0 is a draw.
+    Magnitude = 22 - (stones played by winner at game end).
 
-    If num_simulations > 0, evaluates the dataset using Batched MCTS.
+    If num_simulations > 0, evaluates using Batched MCTS.
     Otherwise, evaluates using raw network predictions.
 
     Returns:
-        Accuracy percentage.
+        Dict with:
+            - accuracy: sign-based accuracy (%)
+            - mae: mean absolute error vs normalized score (score/18)
+            - correlation: Pearson correlation between predictions and normalized scores
     """
     model.eval()
 
-    correct = 0
-    total = 0
+    # Max possible score magnitude: earliest win = 4 stones → 22 - 4 = 18
+    MAX_SCORE = 18
 
-    batch_states = []
-    batch_games = []
-    batch_scores = []
+    all_predictions: list[float] = []
+    all_true_scores: list[int] = []
+
+    batch_states: list[np.ndarray] = []
+    batch_games: list[ConnectFour] = []
+    batch_scores: list[int] = []
     batch_size = 1024
 
-    def evaluate_batch_raw(states: list[np.ndarray], scores: list[int]) -> None:
-        nonlocal correct, total
+    def collect_batch_raw(states: list[np.ndarray], scores: list[int]) -> None:
         if not states:
             return
 
@@ -79,16 +85,10 @@ def evaluate_dataset(
             values = values.cpu().numpy()
 
         for pred_val, true_score in zip(values, scores):
-            if true_score > 0 and pred_val > 0.05:
-                correct += 1
-            elif true_score < 0 and pred_val < -0.05:
-                correct += 1
-            elif true_score == 0 and -0.05 <= pred_val <= 0.05:
-                correct += 1
-        total += len(scores)
+            all_predictions.append(float(pred_val))
+            all_true_scores.append(true_score)
 
-    def evaluate_batch_mcts(games: list[ConnectFour], scores: list[int]) -> None:
-        nonlocal correct, total
+    def collect_batch_mcts(games: list[ConnectFour], scores: list[int]) -> None:
         if not games:
             return
 
@@ -138,17 +138,8 @@ def evaluate_dataset(
                     node.backpropagate(vals[idx].item())
 
         for i, root in enumerate(roots):
-            pred_val = root.q_value
-            true_score = scores[i]
-
-            if true_score > 0 and pred_val > 0.05:
-                correct += 1
-            elif true_score < 0 and pred_val < -0.05:
-                correct += 1
-            elif true_score == 0 and -0.05 <= pred_val <= 0.05:
-                correct += 1
-
-        total += len(scores)
+            all_predictions.append(float(root.q_value))
+            all_true_scores.append(scores[i])
 
     for line in lines:
         parts = line.strip().split()
@@ -170,22 +161,47 @@ def evaluate_dataset(
         batch_scores.append(score)
 
         if num_simulations > 0 and len(batch_games) >= batch_size:
-            evaluate_batch_mcts(batch_games, batch_scores)
+            collect_batch_mcts(batch_games, batch_scores)
             batch_games = []
             batch_scores = []
         elif num_simulations == 0 and len(batch_states) >= batch_size:
-            evaluate_batch_raw(batch_states, batch_scores)
+            collect_batch_raw(batch_states, batch_scores)
             batch_states = []
             batch_scores = []
 
     if num_simulations > 0 and batch_games:
-        evaluate_batch_mcts(batch_games, batch_scores)
+        collect_batch_mcts(batch_games, batch_scores)
     elif num_simulations == 0 and batch_states:
-        evaluate_batch_raw(batch_states, batch_scores)
+        collect_batch_raw(batch_states, batch_scores)
 
-    if total > 0:
-        return (correct / total) * 100
-    return 0.0
+    if not all_predictions:
+        return {"accuracy": 0.0, "mae": 1.0, "correlation": 0.0}
+
+    predictions = np.array(all_predictions)
+    true_scores = np.array(all_true_scores)
+    normalized_scores = np.clip(true_scores / MAX_SCORE, -1.0, 1.0)
+
+    # Sign-based accuracy (existing metric)
+    correct = 0
+    for pred_val, true_score in zip(predictions, true_scores):
+        if true_score > 0 and pred_val > 0.05:
+            correct += 1
+        elif true_score < 0 and pred_val < -0.05:
+            correct += 1
+        elif true_score == 0 and -0.05 <= pred_val <= 0.05:
+            correct += 1
+    accuracy = (correct / len(predictions)) * 100
+
+    # Mean Absolute Error vs normalized score
+    mae = float(np.mean(np.abs(predictions - normalized_scores)))
+
+    # Pearson correlation
+    if np.std(predictions) < 1e-8 or np.std(normalized_scores) < 1e-8:
+        correlation = 0.0
+    else:
+        correlation = float(np.corrcoef(predictions, normalized_scores)[0, 1])
+
+    return {"accuracy": accuracy, "mae": mae, "correlation": correlation}
 
 
 def play_batched_arena(
