@@ -206,10 +206,11 @@ def main() -> None:
         previous_model.eval()
 
         # ── Training phase ──
-        batches_per_epoch = args.batches_per_epoch or max(
-            1, len(replay_buffer) // args.batch_size
+        # When batches_per_epoch is None, trainer auto-scales with a cap of 64
+        effective_batches = args.batches_per_epoch or min(
+            64, max(1, len(replay_buffer) // args.batch_size)
         )
-        print(f"  🧠 Training: {args.epochs} epochs × {batches_per_epoch} batches ...")
+        print(f"  🧠 Training: {args.epochs} epochs × {effective_batches} batches ...")
         model.to(device)
 
         train_start = time.time()
@@ -237,9 +238,7 @@ def main() -> None:
 
         # ── Evaluation phase ──
         print("  📊 Evaluation ...")
-        best_move, center_pct = evaluate_opening_move(
-            model, device, num_simulations=args.eval_simulations
-        )
+        best_move, center_pct = evaluate_opening_move(model, device)
         status = "✅" if best_move == 3 else "❌"
         print(
             f"     {status} Opening Move: played column {best_move + 1} (Center visits: {center_pct:.1f}%)"
