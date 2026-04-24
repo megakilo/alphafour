@@ -46,10 +46,16 @@ def parse_args() -> argparse.Namespace:
         help="Self-play games per iteration (default: 100)",
     )
     parser.add_argument(
-        "--simulations",
+        "--training-simulations",
         type=int,
         default=800,
-        help="MCTS simulations per move (default: 800)",
+        help="MCTS simulations per move for training (default: 800)",
+    )
+    parser.add_argument(
+        "--eval-simulations",
+        type=int,
+        default=100,
+        help="MCTS simulations per move for evaluation (default: 100)",
     )
     parser.add_argument(
         "--epochs",
@@ -176,7 +182,7 @@ def main() -> None:
 
         # ── Self-play phase ──
         print(
-            f"  🎲 Self-play: {args.games_per_iteration} games, {args.simulations} sims/move ..."
+            f"  🎲 Self-play: {args.games_per_iteration} games, {args.training_simulations} sims/move ..."
         )
         model.eval()
 
@@ -184,7 +190,7 @@ def main() -> None:
         examples = run_self_play(
             model=model,
             num_games=args.games_per_iteration,
-            num_simulations=args.simulations,
+            num_simulations=args.training_simulations,
         )
         sp_time = time.time() - sp_start
 
@@ -232,7 +238,7 @@ def main() -> None:
         # ── Evaluation phase ──
         print("  📊 Evaluation ...")
         best_move, center_pct = evaluate_opening_move(
-            model, device, num_simulations=args.simulations
+            model, device, num_simulations=args.eval_simulations
         )
         status = "✅" if best_move == 3 else "❌"
         print(
@@ -260,7 +266,7 @@ def main() -> None:
             model2=previous_model,
             device=device,
             num_games=40,
-            num_simulations=args.simulations,
+            num_simulations=args.eval_simulations,
         )
         m1_wins = m1_w_p1 + m1_w_p2
         m2_wins = m2_w_p1 + m2_w_p2

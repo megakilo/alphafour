@@ -18,10 +18,10 @@ def parse_args() -> argparse.Namespace:
         help="Path to checkpoint file. If not provided, gets the latest checkpoint from checkpoints/ directory.",
     )
     parser.add_argument(
-        "--simulations",
+        "--eval-simulations",
         type=int,
-        default=0,
-        help="MCTS simulations per move for dataset and opening move evaluation (default: 0)",
+        default=100,
+        help="MCTS simulations per move for dataset and opening move evaluation (default: 100)",
     )
     parser.add_argument(
         "--res-blocks",
@@ -72,11 +72,11 @@ def main() -> None:
 
     model.eval()
 
-    print(f"\n  📊 Evaluation with {args.simulations} simulations ...")
+    print(f"\n  📊 Evaluation with {args.eval_simulations} simulations ...")
 
     # Evaluate Opening Move
     best_move, center_pct = evaluate_opening_move(
-        model, device, num_simulations=args.simulations
+        model, device, num_simulations=args.eval_simulations
     )
     status = "✅" if best_move == 3 else "❌"
     print(
@@ -92,7 +92,7 @@ def main() -> None:
             with open(file_path, "r") as f:
                 lines = f.readlines()
             acc = evaluate_dataset(
-                model, device, lines, num_simulations=args.simulations
+                model, device, lines, num_simulations=args.eval_simulations
             )
             dataset_accuracies[file_path.name] = acc
     else:
