@@ -42,14 +42,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--games-per-iteration",
         type=int,
-        default=100,
-        help="Self-play games per iteration (default: 100)",
+        default=200,
+        help="Self-play games per iteration (default: 200)",
     )
     parser.add_argument(
         "--training-simulations",
         type=int,
-        default=800,
-        help="MCTS simulations per move for training (default: 800)",
+        default=400,
+        help="MCTS simulations per move for training (default: 400)",
     )
     parser.add_argument(
         "--eval-simulations",
@@ -113,8 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--buffer-capacity",
         type=int,
-        default=50_000,
-        help="Replay buffer capacity (default: 50000)",
+        default=75_000,
+        help="Replay buffer capacity (default: 75000)",
     )
 
     return parser.parse_args()
@@ -206,9 +206,9 @@ def main() -> None:
         previous_model.eval()
 
         # ── Training phase ──
-        # When batches_per_epoch is None, trainer auto-scales with a cap of 64
-        effective_batches = args.batches_per_epoch or min(
-            64, max(1, len(replay_buffer) // args.batch_size)
+        # When batches_per_epoch is None, trainer auto-scales to buffer size
+        effective_batches = args.batches_per_epoch or max(
+            1, len(replay_buffer) // args.batch_size
         )
         print(f"  🧠 Training: {args.epochs} epochs × {effective_batches} batches ...")
         model.to(device)

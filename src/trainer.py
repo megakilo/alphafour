@@ -72,7 +72,7 @@ class Trainer:
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
         self.scheduler = MultiStepLR(
-            self.optimizer, milestones=[50, 75], gamma=0.1
+            self.optimizer, milestones=[50], gamma=0.1
         )
 
     def train_epoch(
@@ -98,9 +98,9 @@ class Trainer:
 
         effective_batch_size = min(self.batch_size, len(replay_buffer))
 
-        # Auto-scale: cap at 64 batches to prevent over-training on stale data
+        # Auto-scale: one pass through the buffer per epoch
         if num_batches is None:
-            num_batches = min(64, max(1, len(replay_buffer) // effective_batch_size))
+            num_batches = max(1, len(replay_buffer) // effective_batch_size)
 
         for _ in range(num_batches):
             states, target_policies, target_values = replay_buffer.sample(
