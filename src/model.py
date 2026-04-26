@@ -14,8 +14,34 @@ import torch.nn.functional as F
 from .game import ROWS, COLS
 
 
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation block for channel attention.
+
+    Learns to weight channels based on global board information,
+    helping the network reason about whole-board features like
+    piece counts, symmetry, and positional density.
+    """
+
+    def __init__(self, num_filters: int, reduction: int = 8) -> None:
+        super().__init__()
+        mid = max(num_filters // reduction, 1)
+        self.squeeze = nn.AdaptiveAvgPool2d(1)
+        self.excite = nn.Sequential(
+            nn.Linear(num_filters, mid, bias=False),
+            nn.ReLU(),
+            nn.Linear(mid, num_filters, bias=False),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, _, _ = x.shape
+        scale = self.squeeze(x).view(b, c)
+        scale = self.excite(scale).view(b, c, 1, 1)
+        return x * scale
+
+
 class ResBlock(nn.Module):
-    """Residual block with two conv layers and batch norm."""
+    """Residual block with two conv layers, batch norm, and SE attention."""
 
     def __init__(self, num_filters: int) -> None:
         super().__init__()
@@ -23,11 +49,13 @@ class ResBlock(nn.Module):
         self.bn1 = nn.BatchNorm2d(num_filters)
         self.conv2 = nn.Conv2d(num_filters, num_filters, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(num_filters)
+        self.se = SEBlock(num_filters)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
+        out = self.se(out)
         out = out + residual
         return F.relu(out)
 
