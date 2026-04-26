@@ -1,4 +1,8 @@
-"""Self-play data generation with batched MCTS."""
+"""Self-play data generation with batched MCTS.
+
+Uses the Rust engine (alphafour_engine) for high-performance tree search,
+with PyTorch for neural network inference on GPU.
+"""
 
 from __future__ import annotations
 
@@ -6,27 +10,17 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from .game import ConnectFour, COLS
-from .mcts import MCTSNode
 from .model import AlphaZeroNet
-
 
 # Temperature schedule: use τ=1 for first N moves, then τ→0
 TEMP_THRESHOLD = 30  # After this many moves, switch to greedy
 
+try:
+    from alphafour_engine import RustBatchedSelfPlay
 
-def augment_examples(
-    examples: list[tuple[np.ndarray, np.ndarray, float]],
-) -> list[tuple[np.ndarray, np.ndarray, float]]:
-    """Augment training examples by horizontal mirroring."""
-    augmented = list(examples)
-    for state, policy, value in examples:
-        # Mirror state: flip along column axis
-        mirrored_state = state[:, :, ::-1].copy()
-        # Mirror policy: reverse column order
-        mirrored_policy = policy[::-1].copy()
-        augmented.append((mirrored_state, mirrored_policy, value))
-    return augmented
+    RUST_AVAILABLE = True
+except ImportError:
+    RUST_AVAILABLE = False
 
 
 def play_batched_games(
@@ -37,7 +31,131 @@ def play_batched_games(
     dirichlet_alpha: float = 1.0,
     dirichlet_epsilon: float = 0.25,
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
-    """Play multiple games simultaneously using Batched MCTS on GPU."""
+    """Play multiple games simultaneously using Batched MCTS.
+
+    Uses Rust engine if available, otherwise falls back to Python.
+    """
+    if RUST_AVAILABLE:
+        return _play_batched_rust(
+            model, num_games, num_simulations, c_puct,
+            dirichlet_alpha, dirichlet_epsilon,
+        )
+    else:
+        return _play_batched_python(
+            model, num_games, num_simulations, c_puct,
+            dirichlet_alpha, dirichlet_epsilon,
+        )
+
+
+def _play_batched_rust(
+    model: AlphaZeroNet,
+    num_games: int,
+    num_simulations: int,
+    c_puct: float = 1.5,
+    dirichlet_alpha: float = 1.0,
+    dirichlet_epsilon: float = 0.25,
+) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    """High-performance self-play using Rust MCTS engine."""
+    device = next(model.parameters()).device
+    model.eval()
+
+    engine = RustBatchedSelfPlay(
+        num_games, num_simulations, c_puct,
+        dirichlet_alpha, dirichlet_epsilon, TEMP_THRESHOLD,
+    )
+
+    # Initial root expansion
+    states, valid_moves = engine.get_root_states()
+    with torch.no_grad(), torch.autocast(
+        device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"
+    ):
+        states_t = torch.from_numpy(states).to(device)
+        valid_t = torch.from_numpy(valid_moves).to(device)
+        policies, _ = model.predict(states_t, valid_t)
+    engine.init_roots(policies.float().cpu().numpy())
+
+    all_states = []
+    all_policies = []
+    all_values = []
+
+    pbar = tqdm(total=num_games, desc="    Self-play", unit="game")
+
+    while not engine.is_done():
+        prev_active = engine.num_active()
+
+        # Add Dirichlet noise
+        engine.add_noise()
+
+        # Run all simulations for this move
+        for _ in range(num_simulations):
+            leaf_states, leaf_valid, count = engine.collect_leaves()
+            if count > 0:
+                with torch.no_grad(), torch.autocast(
+                    device_type=device.type, dtype=torch.float16,
+                    enabled=device.type == "cuda",
+                ):
+                    states_t = torch.from_numpy(leaf_states).to(device)
+                    valid_t = torch.from_numpy(leaf_valid).to(device)
+                    policies, values = model.predict(states_t, valid_t)
+                engine.apply_evaluations(
+                    policies.float().cpu().numpy(),
+                    values.float().cpu().numpy(),
+                )
+
+        # Advance games, collect finished examples
+        ex_states, ex_policies, ex_values = engine.advance_games()
+        if len(ex_states) > 0:
+            all_states.append(ex_states)
+            all_policies.append(ex_policies)
+            all_values.append(ex_values)
+
+        # Update progress
+        finished = prev_active - engine.num_active()
+        if finished > 0:
+            pbar.update(finished)
+
+        # Expand new roots for still-active games
+        n_active = engine.num_active()
+        if n_active > 0:
+            states, valid_moves = engine.get_root_states()
+            with torch.no_grad(), torch.autocast(
+                device_type=device.type, dtype=torch.float16,
+                enabled=device.type == "cuda",
+            ):
+                states_t = torch.from_numpy(states).to(device)
+                valid_t = torch.from_numpy(valid_moves).to(device)
+                policies, _ = model.predict(states_t, valid_t)
+            engine.init_new_roots(policies.float().cpu().numpy())
+
+    pbar.close()
+
+    # Convert numpy arrays to list of tuples for replay buffer
+    if not all_states:
+        return []
+
+    states_arr = np.concatenate(all_states, axis=0)
+    policies_arr = np.concatenate(all_policies, axis=0)
+    values_arr = np.concatenate(all_values, axis=0)
+
+    examples = []
+    for i in range(len(states_arr)):
+        examples.append((states_arr[i], policies_arr[i], float(values_arr[i])))
+
+    return examples
+
+
+def _play_batched_python(
+    model: AlphaZeroNet,
+    num_games: int,
+    num_simulations: int,
+    c_puct: float = 1.5,
+    dirichlet_alpha: float = 1.0,
+    dirichlet_epsilon: float = 0.25,
+) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    """Fallback: pure Python batched self-play (original implementation)."""
+    from .game import ConnectFour, COLS
+    from .mcts import MCTSNode
+
     device = next(model.parameters()).device
     model.eval()
 
@@ -47,7 +165,9 @@ def play_batched_games(
     active_indices = list(range(num_games))
 
     # Initial evaluate and expand roots
-    with torch.no_grad():
+    with torch.no_grad(), torch.autocast(
+        device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"
+    ):
         states = torch.from_numpy(np.array([g.encode() for g in games])).to(device)
         valid_moves = torch.from_numpy(
             np.array([g.get_valid_moves() for g in games])
@@ -91,7 +211,10 @@ def play_batched_games(
                     eval_indices.append((i, node))
 
             if leaves_to_eval:
-                with torch.no_grad():
+                with torch.no_grad(), torch.autocast(
+                    device_type=device.type, dtype=torch.float16,
+                    enabled=device.type == "cuda",
+                ):
                     states_t = torch.from_numpy(np.stack(leaves_to_eval)).to(device)
                     val_moves_t = torch.from_numpy(
                         np.array(
@@ -155,10 +278,9 @@ def play_batched_games(
                 pbar.update(1)
             else:
                 new_active.append(i)
-                # Reuse MCTS subtree for the chosen action
                 if action in roots[i].children:
                     roots[i] = roots[i].children[action]
-                    roots[i].parent = None  # Detach from old tree
+                    roots[i].parent = None
                 else:
                     roots[i] = MCTSNode(game)
 
@@ -167,7 +289,10 @@ def play_batched_games(
         # Initial evaluate for new roots (skip already-expanded subtree roots)
         needs_expand = [i for i in active_indices if not roots[i].is_expanded]
         if needs_expand:
-            with torch.no_grad():
+            with torch.no_grad(), torch.autocast(
+                device_type=device.type, dtype=torch.float16,
+                enabled=device.type == "cuda",
+            ):
                 states_t = torch.from_numpy(
                     np.array([games[i].encode() for i in needs_expand])
                 ).to(device)
@@ -184,6 +309,18 @@ def play_batched_games(
     return all_examples
 
 
+def augment_examples(
+    examples: list[tuple[np.ndarray, np.ndarray, float]],
+) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    """Augment training examples by horizontal mirroring."""
+    augmented = list(examples)
+    for state, policy, value in examples:
+        mirrored_state = state[:, :, ::-1].copy()
+        mirrored_policy = policy[::-1].copy()
+        augmented.append((mirrored_state, mirrored_policy, value))
+    return augmented
+
+
 def run_self_play(
     model: AlphaZeroNet,
     num_games: int,
@@ -192,10 +329,19 @@ def run_self_play(
     dirichlet_alpha: float = 1.0,
     dirichlet_epsilon: float = 0.25,
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
-    """Run self-play games using Batched MCTS."""
+    """Run self-play games using Batched MCTS.
+
+    If Rust engine is available, augmentation is done in Rust.
+    Otherwise, Python augmentation is applied.
+    """
     examples = play_batched_games(
         model=model,
         num_games=num_games,
         num_simulations=num_simulations,
     )
-    return augment_examples(examples)
+
+    # Rust engine already includes augmentation
+    if RUST_AVAILABLE:
+        return examples
+    else:
+        return augment_examples(examples)

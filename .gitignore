@@ -11,3 +11,9 @@ wheels/
 
 # Checkpoints / training artifacts
 checkpoints/
+
+# Rust-generated files
+rust/target
+
+# Local editor
+.vscode
