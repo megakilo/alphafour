@@ -8,7 +8,7 @@ from collections import deque
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from .model import AlphaZeroNet
 from .game import ROWS
@@ -71,8 +71,8 @@ class Trainer:
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
-        self.scheduler = MultiStepLR(
-            self.optimizer, milestones=[50], gamma=0.1
+        self.scheduler = CosineAnnealingLR(
+            self.optimizer, T_max=total_iterations, eta_min=1e-5
         )
 
     def train_epoch(
