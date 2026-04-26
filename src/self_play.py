@@ -14,6 +14,7 @@ from .model import AlphaZeroNet
 
 # Temperature schedule: use τ=1 for first N moves, then τ→0
 TEMP_THRESHOLD = 30  # After this many moves, switch to greedy
+RANDOM_OPENING_PLIES = 2  # Random moves before MCTS (not recorded)
 
 try:
     from alphafour_engine import RustBatchedSelfPlay
@@ -62,6 +63,7 @@ def _play_batched_rust(
     engine = RustBatchedSelfPlay(
         num_games, num_simulations, c_puct,
         dirichlet_alpha, dirichlet_epsilon, TEMP_THRESHOLD,
+        RANDOM_OPENING_PLIES,
     )
 
     # Initial root expansion

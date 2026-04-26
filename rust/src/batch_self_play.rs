@@ -39,6 +39,7 @@ pub struct BatchedSelfPlay {
     dirichlet_alpha: f64,
     dirichlet_epsilon: f64,
     temp_threshold: usize,
+    _random_opening_plies: usize,
 }
 
 impl BatchedSelfPlay {
@@ -49,13 +50,24 @@ impl BatchedSelfPlay {
         dirichlet_alpha: f64,
         dirichlet_epsilon: f64,
         temp_threshold: usize,
+        random_opening_plies: usize,
     ) -> Self {
+        let mut rng = rand::thread_rng();
         let mut games = Vec::with_capacity(num_games);
         let mut trees = Vec::with_capacity(num_games);
         let mut histories = Vec::with_capacity(num_games);
 
         for _ in 0..num_games {
-            let game = ConnectFour::new();
+            let mut game = ConnectFour::new();
+            // Play random opening moves (not recorded as training data)
+            for _ in 0..random_opening_plies {
+                let valid = game.get_valid_move_indices();
+                if valid.is_empty() || game.is_terminal() {
+                    break;
+                }
+                let col = valid[rng.gen_range(0..valid.len())];
+                game.make_move(col);
+            }
             trees.push(MCTSTree::new(game.clone()));
             games.push(game);
             histories.push(Vec::new());
@@ -74,6 +86,7 @@ impl BatchedSelfPlay {
             dirichlet_alpha,
             dirichlet_epsilon,
             temp_threshold,
+            _random_opening_plies: random_opening_plies,
         }
     }
 
@@ -297,14 +310,14 @@ mod tests {
 
     #[test]
     fn test_new_engine() {
-        let engine = BatchedSelfPlay::new(10, 100, 1.5, 1.0, 0.25, 30);
+        let engine = BatchedSelfPlay::new(10, 100, 1.5, 1.0, 0.25, 30, 0);
         assert_eq!(engine.num_active(), 10);
         assert!(!engine.is_done());
     }
 
     #[test]
     fn test_get_root_states() {
-        let engine = BatchedSelfPlay::new(5, 10, 1.5, 1.0, 0.25, 30);
+        let engine = BatchedSelfPlay::new(5, 10, 1.5, 1.0, 0.25, 30, 0);
         let (states, valid) = engine.get_root_states();
         assert_eq!(states.len(), 5 * 3 * BOARD_SIZE);
         assert_eq!(valid.len(), 5 * COLS);
@@ -312,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_init_roots() {
-        let mut engine = BatchedSelfPlay::new(3, 10, 1.5, 1.0, 0.25, 30);
+        let mut engine = BatchedSelfPlay::new(3, 10, 1.5, 1.0, 0.25, 30, 0);
         let policies = vec![1.0 / COLS as f32; 3 * COLS];
         engine.init_roots(&policies);
 
@@ -324,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_collect_and_apply() {
-        let mut engine = BatchedSelfPlay::new(3, 10, 1.5, 1.0, 0.25, 30);
+        let mut engine = BatchedSelfPlay::new(3, 10, 1.5, 1.0, 0.25, 30, 0);
 
         // Init roots
         let policies = vec![1.0 / COLS as f32; 3 * COLS];
@@ -345,7 +358,7 @@ mod tests {
 
     #[test]
     fn test_full_game_loop() {
-        let mut engine = BatchedSelfPlay::new(2, 5, 1.5, 1.0, 0.25, 30);
+        let mut engine = BatchedSelfPlay::new(2, 5, 1.5, 1.0, 0.25, 30, 0);
         let mut all_examples = Vec::new();
 
         // Init roots

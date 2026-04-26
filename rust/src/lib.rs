@@ -150,7 +150,7 @@ struct PyBatchedSelfPlay {
 #[pymethods]
 impl PyBatchedSelfPlay {
     #[new]
-    #[pyo3(signature = (num_games, num_simulations, c_puct=1.5, dirichlet_alpha=1.0, dirichlet_epsilon=0.25, temp_threshold=30))]
+    #[pyo3(signature = (num_games, num_simulations, c_puct=1.5, dirichlet_alpha=1.0, dirichlet_epsilon=0.25, temp_threshold=30, random_opening_plies=0))]
     fn new(
         num_games: usize,
         num_simulations: usize,
@@ -158,6 +158,7 @@ impl PyBatchedSelfPlay {
         dirichlet_alpha: f64,
         dirichlet_epsilon: f64,
         temp_threshold: usize,
+        random_opening_plies: usize,
     ) -> Self {
         PyBatchedSelfPlay {
             inner: BatchedSelfPlay::new(
@@ -167,6 +168,7 @@ impl PyBatchedSelfPlay {
                 dirichlet_alpha,
                 dirichlet_epsilon,
                 temp_threshold,
+                random_opening_plies,
             ),
         }
     }
