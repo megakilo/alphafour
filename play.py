@@ -62,8 +62,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--simulations",
         type=int,
-        default=800,
-        help="MCTS simulations per move (default: 800, higher = stronger)",
+        default=200,
+        help="MCTS simulations per move (default: 200, higher = stronger)",
     )
     parser.add_argument(
         "--res-blocks",
@@ -76,6 +76,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=128,
         help="Number of convolutional filters (default: 128)",
+    )
+    parser.add_argument(
+        "--cpu",
+        action="store_true",
+        help="Force CPU inference even if GPU is available",
     )
     return parser.parse_args()
 
@@ -171,8 +176,11 @@ def main() -> None:
     print(f"{BOLD}  🎮 Connect Four vs AlphaZero AI{RESET}")
     print(f"{BOLD}{'═' * 40}{RESET}")
 
-    # Load model
-    device = get_device()
+    # Load device
+    if args.cpu:
+        device = torch.device("cpu")
+    else:
+        device = get_device()
 
     # Find checkpoint
     if args.checkpoint:
