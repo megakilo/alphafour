@@ -8,15 +8,19 @@ from collections import deque
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 from .model import AlphaZeroNet
 from .game import ROWS
 
 
 class ReplayBuffer:
-    """Fixed-size replay buffer for training examples."""
+    """Fixed-size replay buffer with recency-weighted sampling.
+
+    More recently added examples are sampled with higher probability,
+    preventing the model from overfitting to stale data as the self-play
+    distribution evolves during training.
+    """
 
     def __init__(self, capacity: int = 200_000) -> None:
         self.buffer: deque[tuple[np.ndarray, np.ndarray, float]] = deque(
@@ -28,17 +32,30 @@ class ReplayBuffer:
         self.buffer.extend(examples)
 
     def sample(self, batch_size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Sample a random batch.
+        """Sample a batch with recency-weighted probabilities.
+
+        Uses linearly increasing weights: the newest example has 3× the
+        sampling probability of the oldest. This keeps the training signal
+        fresh while still using older data for stability.
 
         Returns:
             states: (batch, 3, 6, 7) float32
             policies: (batch, 7) float32
             values: (batch,) float32
         """
-        batch = random.sample(list(self.buffer), min(batch_size, len(self.buffer)))
-        states = np.array([s for s, _, _ in batch], dtype=np.float32)
-        policies = np.array([p for _, p, _ in batch], dtype=np.float32)
-        values = np.array([v for _, _, v in batch], dtype=np.float32)
+        n = len(self.buffer)
+        actual_size = min(batch_size, n)
+
+        # Linear weights: oldest=1.0, newest=3.0
+        weights = np.linspace(1.0, 3.0, n)
+        weights /= weights.sum()
+
+        indices = np.random.choice(n, size=actual_size, replace=False, p=weights)
+
+        buf_list = list(self.buffer)  # Required for indexed access
+        states = np.array([buf_list[i][0] for i in indices], dtype=np.float32)
+        policies = np.array([buf_list[i][1] for i in indices], dtype=np.float32)
+        values = np.array([buf_list[i][2] for i in indices], dtype=np.float32)
         return states, policies, values
 
     def __len__(self) -> int:
@@ -55,7 +72,7 @@ class ReplayBuffer:
 
 
 class Trainer:
-    """AlphaZero trainer."""
+    """AlphaZero trainer with warm-restart LR schedule."""
 
     def __init__(
         self,
@@ -72,8 +89,12 @@ class Trainer:
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
-        self.scheduler = CosineAnnealingLR(
-            self.optimizer, T_max=total_iterations, eta_min=1e-5
+        # Warm restarts: cycle length T_0=20 iters, doubling each restart.
+        # This periodically bumps LR back up, helping the model adapt to
+        # the evolving self-play distribution rather than overfitting
+        # to stale buffer data.
+        self.scheduler = CosineAnnealingWarmRestarts(
+            self.optimizer, T_0=20, T_mult=2, eta_min=1e-5
         )
 
     def train_epoch(

@@ -206,17 +206,20 @@ def main() -> None:
         previous_model.eval()
 
         # ── Training phase ──
+        # Dynamic epoch scheduling: more epochs early (fresh model, sparse data),
+        # fewer epochs later (risk of overfitting to stale buffer data).
+        num_epochs = 4 if iteration < 20 else args.epochs
         # When batches_per_epoch is None, trainer auto-scales to buffer size
         effective_batches = args.batches_per_epoch or max(
             1, len(replay_buffer) // args.batch_size
         )
-        print(f"  🧠 Training: {args.epochs} epochs × {effective_batches} batches ...")
+        print(f"  🧠 Training: {num_epochs} epochs × {effective_batches} batches ...")
         model.to(device)
 
         train_start = time.time()
         total_losses = {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
 
-        for epoch in tqdm(range(args.epochs), desc="  Training", unit="epoch"):
+        for epoch in tqdm(range(num_epochs), desc="  Training", unit="epoch"):
             losses = trainer.train_epoch(
                 replay_buffer, num_batches=args.batches_per_epoch
             )
@@ -224,7 +227,7 @@ def main() -> None:
                 total_losses[k] += losses[k]
 
         train_time = time.time() - train_start
-        avg_losses = {k: v / args.epochs for k, v in total_losses.items()}
+        avg_losses = {k: v / num_epochs for k, v in total_losses.items()}
 
         print(
             f"     Loss: policy={avg_losses['policy_loss']:.4f}, "
