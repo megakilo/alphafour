@@ -88,8 +88,12 @@ def _play_batched_rust(
         # Add Dirichlet noise
         engine.add_noise()
 
-        # Run all simulations for this move
-        for _ in range(num_simulations):
+        # Run simulations with multi-leaf batching.
+        # The Rust engine collects LEAVES_PER_GAME leaves per game per call
+        # using virtual losses, so we need fewer round-trips.
+        leaves_per_game = 16  # Must match LEAVES_PER_GAME in Rust
+        num_batches = max(1, num_simulations // leaves_per_game)
+        for _ in range(num_batches):
             leaf_states, leaf_valid, count = engine.collect_leaves()
             if count > 0:
                 with torch.no_grad(), torch.autocast(

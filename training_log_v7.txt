@@ -1,0 +1,2111 @@
+🎮 AlphaZero Connect Four Training
+   Device: cuda
+   Iterations: 100
+   Games/iteration: 500
+   MCTS simulations: 2400
+   Model: 10 res blocks, 128 filters
+
+   Parameters: 3,011,162
+
+━━━ Iteration 1/100 (lr=0.001000) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 23114 examples in 380.6s (buffer: 23114)
+  🧠 Training: 2 epochs × 90 batches ...
+     Loss: policy=1.7828, value=0.7609, total=2.5437 (3.2s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 16.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=80.7% mae=0.402 r=0.612
+       - Test_L1_R2: acc=66.2% mae=0.375 r=0.524
+       - Test_L1_R3: acc=51.9% mae=0.251 r=0.412
+       - Test_L2_R1: acc=68.6% mae=0.480 r=0.417
+       - Test_L2_R2: acc=48.7% mae=0.508 r=0.248
+       - Test_L3_R1: acc=34.6% mae=0.508 r=0.171
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 40 - 0 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 20 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 100.0%
+  💾 Saved: checkpoints/checkpoint_0001.pt (394.2s total)
+
+━━━ Iteration 2/100 (lr=0.001000) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 24418 examples in 374.4s (buffer: 47532)
+  🧠 Training: 2 epochs × 185 batches ...
+     Loss: policy=1.5803, value=0.5793, total=2.1596 (6.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 43.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=77.4% mae=0.444 r=0.532
+       - Test_L1_R2: acc=66.2% mae=0.468 r=0.446
+       - Test_L1_R3: acc=49.9% mae=0.282 r=0.350
+       - Test_L2_R1: acc=67.2% mae=0.614 r=0.377
+       - Test_L2_R2: acc=52.3% mae=0.636 r=0.295
+       - Test_L3_R1: acc=36.4% mae=0.625 r=0.221
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 40 Previous Model (Draws: 0)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 20 wins as P2
+     New Model Winrate: 0.0%
+  💾 Saved: checkpoints/checkpoint_0002.pt (387.9s total)
+
+━━━ Iteration 3/100 (lr=0.000999) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28314 examples in 405.3s (buffer: 75846)
+  🧠 Training: 2 epochs × 296 batches ...
+     Loss: policy=1.3670, value=0.4655, total=1.8325 (10.1s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 47.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=81.5% mae=0.407 r=0.650
+       - Test_L1_R2: acc=68.9% mae=0.511 r=0.497
+       - Test_L1_R3: acc=50.4% mae=0.354 r=0.364
+       - Test_L2_R1: acc=68.7% mae=0.636 r=0.422
+       - Test_L2_R2: acc=52.0% mae=0.678 r=0.271
+       - Test_L3_R1: acc=38.1% mae=0.616 r=0.277
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0003.pt (432.0s total)
+
+━━━ Iteration 4/100 (lr=0.000998) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29114 examples in 420.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=1.2022, value=0.4015, total=1.6036 (13.5s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 63.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=79.1% mae=0.456 r=0.571
+       - Test_L1_R2: acc=68.8% mae=0.553 r=0.478
+       - Test_L1_R3: acc=50.3% mae=0.367 r=0.304
+       - Test_L2_R1: acc=72.0% mae=0.653 r=0.478
+       - Test_L2_R2: acc=54.6% mae=0.696 r=0.353
+       - Test_L3_R1: acc=40.9% mae=0.638 r=0.319
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 40 Previous Model (Draws: 0)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 20 wins as P2
+     New Model Winrate: 0.0%
+  💾 Saved: checkpoints/checkpoint_0004.pt (448.7s total)
+
+━━━ Iteration 5/100 (lr=0.000996) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30318 examples in 431.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=1.0084, value=0.3590, total=1.3674 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 63.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=83.2% mae=0.415 r=0.652
+       - Test_L1_R2: acc=67.7% mae=0.511 r=0.455
+       - Test_L1_R3: acc=52.2% mae=0.343 r=0.332
+       - Test_L2_R1: acc=73.7% mae=0.607 r=0.534
+       - Test_L2_R2: acc=55.3% mae=0.637 r=0.397
+       - Test_L3_R1: acc=47.0% mae=0.539 r=0.382
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 40 Previous Model (Draws: 0)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 20 wins as P2
+     New Model Winrate: 0.0%
+  💾 Saved: checkpoints/checkpoint_0005.pt (462.5s total)
+
+━━━ Iteration 6/100 (lr=0.000994) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30146 examples in 438.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.9057, value=0.3198, total=1.2255 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 62.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=80.3% mae=0.463 r=0.652
+       - Test_L1_R2: acc=72.2% mae=0.574 r=0.557
+       - Test_L1_R3: acc=56.9% mae=0.378 r=0.471
+       - Test_L2_R1: acc=76.4% mae=0.618 r=0.579
+       - Test_L2_R2: acc=56.2% mae=0.692 r=0.419
+       - Test_L3_R1: acc=41.2% mae=0.650 r=0.348
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 40 Previous Model (Draws: 0)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 20 wins as P2
+     New Model Winrate: 0.0%
+  💾 Saved: checkpoints/checkpoint_0006.pt (469.2s total)
+
+━━━ Iteration 7/100 (lr=0.000991) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29894 examples in 435.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.8526, value=0.3083, total=1.1608 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 76.1%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=81.5% mae=0.448 r=0.627
+       - Test_L1_R2: acc=70.7% mae=0.584 r=0.529
+       - Test_L1_R3: acc=58.3% mae=0.414 r=0.466
+       - Test_L2_R1: acc=77.0% mae=0.633 r=0.569
+       - Test_L2_R2: acc=54.6% mae=0.711 r=0.363
+       - Test_L3_R1: acc=45.4% mae=0.578 r=0.391
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 0 wins as P1, 20 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 20 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0007.pt (464.0s total)
+
+━━━ Iteration 8/100 (lr=0.000988) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31430 examples in 426.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7903, value=0.2699, total=1.0602 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 76.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=82.4% mae=0.427 r=0.636
+       - Test_L1_R2: acc=71.5% mae=0.571 r=0.558
+       - Test_L1_R3: acc=58.6% mae=0.375 r=0.486
+       - Test_L2_R1: acc=76.5% mae=0.629 r=0.577
+       - Test_L2_R2: acc=55.6% mae=0.682 r=0.402
+       - Test_L3_R1: acc=51.2% mae=0.514 r=0.389
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 40 - 0 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 20 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 100.0%
+  💾 Saved: checkpoints/checkpoint_0008.pt (455.6s total)
+
+━━━ Iteration 9/100 (lr=0.000984) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30316 examples in 412.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7492, value=0.2536, total=1.0027 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 73.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=84.0% mae=0.388 r=0.675
+       - Test_L1_R2: acc=73.0% mae=0.553 r=0.571
+       - Test_L1_R3: acc=61.8% mae=0.396 r=0.544
+       - Test_L2_R1: acc=76.3% mae=0.595 r=0.584
+       - Test_L2_R2: acc=59.4% mae=0.648 r=0.445
+       - Test_L3_R1: acc=53.0% mae=0.496 r=0.403
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 40 - 0 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 20 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 100.0%
+  💾 Saved: checkpoints/checkpoint_0009.pt (444.2s total)
+
+━━━ Iteration 10/100 (lr=0.000980) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31600 examples in 429.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7194, value=0.2303, total=0.9497 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 77.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=80.9% mae=0.449 r=0.617
+       - Test_L1_R2: acc=74.8% mae=0.544 r=0.619
+       - Test_L1_R3: acc=62.5% mae=0.381 r=0.571
+       - Test_L2_R1: acc=76.5% mae=0.589 r=0.578
+       - Test_L2_R2: acc=57.7% mae=0.633 r=0.435
+       - Test_L3_R1: acc=55.3% mae=0.511 r=0.433
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 0 Previous Model (Draws: 40)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0010.pt (460.6s total)
+
+━━━ Iteration 11/100 (lr=0.000976) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 32344 examples in 429.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6979, value=0.2307, total=0.9287 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 84.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=85.1% mae=0.389 r=0.698
+       - Test_L1_R2: acc=74.2% mae=0.520 r=0.622
+       - Test_L1_R3: acc=62.1% mae=0.381 r=0.568
+       - Test_L2_R1: acc=76.6% mae=0.531 r=0.625
+       - Test_L2_R2: acc=57.1% mae=0.584 r=0.436
+       - Test_L3_R1: acc=63.2% mae=0.374 r=0.475
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 0 Previous Model (Draws: 40)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0011.pt (460.8s total)
+
+━━━ Iteration 12/100 (lr=0.000971) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 32242 examples in 439.9s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6889, value=0.2488, total=0.9377 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 82.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=85.1% mae=0.406 r=0.728
+       - Test_L1_R2: acc=77.1% mae=0.588 r=0.647
+       - Test_L1_R3: acc=60.8% mae=0.427 r=0.568
+       - Test_L2_R1: acc=76.6% mae=0.601 r=0.599
+       - Test_L2_R2: acc=57.1% mae=0.656 r=0.446
+       - Test_L3_R1: acc=55.2% mae=0.526 r=0.434
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0012.pt (471.3s total)
+
+━━━ Iteration 13/100 (lr=0.000965) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 32154 examples in 441.9s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6622, value=0.2568, total=0.9190 (13.7s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 80.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=86.6% mae=0.377 r=0.734
+       - Test_L1_R2: acc=75.8% mae=0.542 r=0.629
+       - Test_L1_R3: acc=62.1% mae=0.397 r=0.578
+       - Test_L2_R1: acc=80.1% mae=0.599 r=0.633
+       - Test_L2_R2: acc=57.8% mae=0.684 r=0.432
+       - Test_L3_R1: acc=48.3% mae=0.646 r=0.414
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 0 Previous Model (Draws: 40)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0013.pt (474.0s total)
+
+━━━ Iteration 14/100 (lr=0.000959) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 32468 examples in 429.9s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6416, value=0.2512, total=0.8928 (13.9s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 82.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=86.2% mae=0.389 r=0.741
+       - Test_L1_R2: acc=78.6% mae=0.578 r=0.673
+       - Test_L1_R3: acc=63.3% mae=0.443 r=0.601
+       - Test_L2_R1: acc=79.8% mae=0.596 r=0.642
+       - Test_L2_R2: acc=59.1% mae=0.672 r=0.452
+       - Test_L3_R1: acc=54.4% mae=0.570 r=0.478
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 0 wins as P1, 20 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0014.pt (461.9s total)
+
+━━━ Iteration 15/100 (lr=0.000953) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31252 examples in 420.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6333, value=0.2276, total=0.8608 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 71.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=87.3% mae=0.378 r=0.765
+       - Test_L1_R2: acc=77.9% mae=0.595 r=0.677
+       - Test_L1_R3: acc=61.6% mae=0.459 r=0.603
+       - Test_L2_R1: acc=79.2% mae=0.600 r=0.629
+       - Test_L2_R2: acc=58.5% mae=0.665 r=0.461
+       - Test_L3_R1: acc=53.7% mae=0.590 r=0.439
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 20 Previous Model (Draws: 20)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 20 wins as P2
+     New Model Winrate: 25.0%
+  💾 Saved: checkpoints/checkpoint_0015.pt (450.5s total)
+
+━━━ Iteration 16/100 (lr=0.000946) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 32000 examples in 425.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6277, value=0.2146, total=0.8423 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 63.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=88.7% mae=0.383 r=0.778
+       - Test_L1_R2: acc=78.3% mae=0.625 r=0.661
+       - Test_L1_R3: acc=63.1% mae=0.507 r=0.577
+       - Test_L2_R1: acc=81.2% mae=0.613 r=0.668
+       - Test_L2_R2: acc=57.1% mae=0.709 r=0.442
+       - Test_L3_R1: acc=54.3% mae=0.575 r=0.452
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 0 Previous Model (Draws: 40)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0016.pt (456.3s total)
+
+━━━ Iteration 17/100 (lr=0.000939) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31538 examples in 415.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6216, value=0.2089, total=0.8305 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 60.8%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.6% mae=0.355 r=0.817
+       - Test_L1_R2: acc=81.1% mae=0.629 r=0.721
+       - Test_L1_R3: acc=63.9% mae=0.531 r=0.611
+       - Test_L2_R1: acc=81.4% mae=0.592 r=0.666
+       - Test_L2_R2: acc=58.7% mae=0.666 r=0.460
+       - Test_L3_R1: acc=62.1% mae=0.501 r=0.474
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 0 Previous Model (Draws: 40)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0017.pt (446.9s total)
+
+━━━ Iteration 18/100 (lr=0.000931) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30998 examples in 412.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6247, value=0.2076, total=0.8323 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 66.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=89.2% mae=0.372 r=0.780
+       - Test_L1_R2: acc=80.4% mae=0.588 r=0.706
+       - Test_L1_R3: acc=64.0% mae=0.483 r=0.622
+       - Test_L2_R1: acc=80.1% mae=0.588 r=0.651
+       - Test_L2_R2: acc=59.7% mae=0.639 r=0.486
+       - Test_L3_R1: acc=63.9% mae=0.469 r=0.515
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0018.pt (441.2s total)
+
+━━━ Iteration 19/100 (lr=0.000923) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31142 examples in 410.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6248, value=0.1859, total=0.8107 (13.7s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 75.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=89.5% mae=0.367 r=0.790
+       - Test_L1_R2: acc=78.8% mae=0.582 r=0.684
+       - Test_L1_R3: acc=64.8% mae=0.436 r=0.621
+       - Test_L2_R1: acc=78.7% mae=0.599 r=0.654
+       - Test_L2_R2: acc=58.3% mae=0.637 r=0.456
+       - Test_L3_R1: acc=63.5% mae=0.476 r=0.503
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0019.pt (439.7s total)
+
+━━━ Iteration 20/100 (lr=0.000914) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31856 examples in 436.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6289, value=0.1956, total=0.8245 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 80.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=87.6% mae=0.376 r=0.765
+       - Test_L1_R2: acc=80.4% mae=0.568 r=0.712
+       - Test_L1_R3: acc=63.9% mae=0.462 r=0.651
+       - Test_L2_R1: acc=80.2% mae=0.566 r=0.663
+       - Test_L2_R2: acc=58.9% mae=0.622 r=0.475
+       - Test_L3_R1: acc=64.5% mae=0.470 r=0.516
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0020.pt (467.2s total)
+
+━━━ Iteration 21/100 (lr=0.000905) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31326 examples in 433.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6240, value=0.1853, total=0.8093 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 91.8%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=88.1% mae=0.383 r=0.755
+       - Test_L1_R2: acc=80.6% mae=0.628 r=0.699
+       - Test_L1_R3: acc=66.4% mae=0.511 r=0.640
+       - Test_L2_R1: acc=80.6% mae=0.604 r=0.668
+       - Test_L2_R2: acc=59.1% mae=0.695 r=0.452
+       - Test_L3_R1: acc=58.7% mae=0.552 r=0.490
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 20 Previous Model (Draws: 20)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 25.0%
+  💾 Saved: checkpoints/checkpoint_0021.pt (465.2s total)
+
+━━━ Iteration 22/100 (lr=0.000896) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30666 examples in 420.9s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6252, value=0.1812, total=0.8063 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=88.5% mae=0.365 r=0.786
+       - Test_L1_R2: acc=81.8% mae=0.595 r=0.731
+       - Test_L1_R3: acc=63.0% mae=0.489 r=0.646
+       - Test_L2_R1: acc=80.0% mae=0.607 r=0.641
+       - Test_L2_R2: acc=57.8% mae=0.660 r=0.462
+       - Test_L3_R1: acc=56.8% mae=0.562 r=0.465
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0022.pt (452.6s total)
+
+━━━ Iteration 23/100 (lr=0.000886) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29638 examples in 414.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6245, value=0.1646, total=0.7891 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=90.2% mae=0.358 r=0.812
+       - Test_L1_R2: acc=81.6% mae=0.601 r=0.732
+       - Test_L1_R3: acc=64.6% mae=0.494 r=0.669
+       - Test_L2_R1: acc=80.4% mae=0.581 r=0.665
+       - Test_L2_R2: acc=59.2% mae=0.624 r=0.472
+       - Test_L3_R1: acc=68.1% mae=0.410 r=0.518
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 0 wins as P1, 20 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0023.pt (445.2s total)
+
+━━━ Iteration 24/100 (lr=0.000876) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31206 examples in 428.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6172, value=0.1685, total=0.7857 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=87.3% mae=0.393 r=0.757
+       - Test_L1_R2: acc=78.0% mae=0.614 r=0.701
+       - Test_L1_R3: acc=63.5% mae=0.476 r=0.632
+       - Test_L2_R1: acc=82.1% mae=0.607 r=0.677
+       - Test_L2_R2: acc=57.1% mae=0.675 r=0.454
+       - Test_L3_R1: acc=61.9% mae=0.540 r=0.504
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0024.pt (460.6s total)
+
+━━━ Iteration 25/100 (lr=0.000866) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30052 examples in 419.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6191, value=0.1820, total=0.8011 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 98.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=88.3% mae=0.368 r=0.766
+       - Test_L1_R2: acc=79.9% mae=0.612 r=0.686
+       - Test_L1_R3: acc=66.2% mae=0.466 r=0.648
+       - Test_L2_R1: acc=81.6% mae=0.594 r=0.671
+       - Test_L2_R2: acc=59.0% mae=0.657 r=0.447
+       - Test_L3_R1: acc=65.9% mae=0.515 r=0.500
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0025.pt (450.0s total)
+
+━━━ Iteration 26/100 (lr=0.000855) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30222 examples in 421.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6178, value=0.1733, total=0.7911 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 96.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=88.3% mae=0.353 r=0.803
+       - Test_L1_R2: acc=79.8% mae=0.602 r=0.700
+       - Test_L1_R3: acc=65.2% mae=0.442 r=0.635
+       - Test_L2_R1: acc=82.2% mae=0.596 r=0.672
+       - Test_L2_R2: acc=58.9% mae=0.673 r=0.458
+       - Test_L3_R1: acc=64.4% mae=0.523 r=0.521
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0026.pt (451.2s total)
+
+━━━ Iteration 27/100 (lr=0.000844) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29024 examples in 413.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6450, value=0.1728, total=0.8177 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.6% mae=0.348 r=0.826
+       - Test_L1_R2: acc=81.1% mae=0.626 r=0.719
+       - Test_L1_R3: acc=67.8% mae=0.497 r=0.660
+       - Test_L2_R1: acc=81.8% mae=0.603 r=0.668
+       - Test_L2_R2: acc=60.2% mae=0.675 r=0.487
+       - Test_L3_R1: acc=67.0% mae=0.499 r=0.510
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0027.pt (439.3s total)
+
+━━━ Iteration 28/100 (lr=0.000832) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31182 examples in 423.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6374, value=0.1635, total=0.8009 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.4% mae=0.345 r=0.834
+       - Test_L1_R2: acc=82.0% mae=0.632 r=0.729
+       - Test_L1_R3: acc=67.2% mae=0.525 r=0.679
+       - Test_L2_R1: acc=82.5% mae=0.611 r=0.679
+       - Test_L2_R2: acc=60.1% mae=0.717 r=0.477
+       - Test_L3_R1: acc=64.2% mae=0.549 r=0.495
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 0 wins as P1, 20 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 20 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0028.pt (453.6s total)
+
+━━━ Iteration 29/100 (lr=0.000821) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30902 examples in 424.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6331, value=0.1538, total=0.7869 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 91.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.7% mae=0.358 r=0.824
+       - Test_L1_R2: acc=82.2% mae=0.634 r=0.740
+       - Test_L1_R3: acc=68.7% mae=0.525 r=0.675
+       - Test_L2_R1: acc=81.9% mae=0.609 r=0.668
+       - Test_L2_R2: acc=61.2% mae=0.682 r=0.488
+       - Test_L3_R1: acc=67.2% mae=0.499 r=0.521
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0029.pt (454.0s total)
+
+━━━ Iteration 30/100 (lr=0.000808) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 32002 examples in 426.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6106, value=0.1546, total=0.7651 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=89.7% mae=0.380 r=0.798
+       - Test_L1_R2: acc=81.5% mae=0.631 r=0.731
+       - Test_L1_R3: acc=67.3% mae=0.508 r=0.656
+       - Test_L2_R1: acc=81.9% mae=0.626 r=0.665
+       - Test_L2_R2: acc=60.9% mae=0.715 r=0.493
+       - Test_L3_R1: acc=59.8% mae=0.606 r=0.451
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0030.pt (456.1s total)
+
+━━━ Iteration 31/100 (lr=0.000796) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30758 examples in 417.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.5995, value=0.1591, total=0.7586 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=89.6% mae=0.360 r=0.812
+       - Test_L1_R2: acc=80.6% mae=0.578 r=0.735
+       - Test_L1_R3: acc=65.9% mae=0.472 r=0.652
+       - Test_L2_R1: acc=81.3% mae=0.592 r=0.675
+       - Test_L2_R2: acc=60.7% mae=0.647 r=0.503
+       - Test_L3_R1: acc=62.9% mae=0.529 r=0.492
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0031.pt (448.8s total)
+
+━━━ Iteration 32/100 (lr=0.000783) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30328 examples in 424.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6020, value=0.1657, total=0.7677 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.9% mae=0.350 r=0.834
+       - Test_L1_R2: acc=84.0% mae=0.621 r=0.762
+       - Test_L1_R3: acc=67.2% mae=0.544 r=0.662
+       - Test_L2_R1: acc=81.6% mae=0.613 r=0.673
+       - Test_L2_R2: acc=60.5% mae=0.689 r=0.494
+       - Test_L3_R1: acc=62.1% mae=0.550 r=0.501
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0032.pt (454.0s total)
+
+━━━ Iteration 33/100 (lr=0.000770) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30980 examples in 421.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6082, value=0.1711, total=0.7792 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.9% mae=0.354 r=0.811
+       - Test_L1_R2: acc=82.1% mae=0.598 r=0.737
+       - Test_L1_R3: acc=67.5% mae=0.491 r=0.661
+       - Test_L2_R1: acc=81.0% mae=0.604 r=0.664
+       - Test_L2_R2: acc=60.5% mae=0.672 r=0.497
+       - Test_L3_R1: acc=66.7% mae=0.505 r=0.557
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0033.pt (453.3s total)
+
+━━━ Iteration 34/100 (lr=0.000757) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30970 examples in 424.9s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6152, value=0.1723, total=0.7875 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 76.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=89.0% mae=0.396 r=0.769
+       - Test_L1_R2: acc=82.8% mae=0.613 r=0.733
+       - Test_L1_R3: acc=67.4% mae=0.520 r=0.668
+       - Test_L2_R1: acc=82.5% mae=0.610 r=0.680
+       - Test_L2_R2: acc=60.0% mae=0.678 r=0.490
+       - Test_L3_R1: acc=66.8% mae=0.522 r=0.549
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0034.pt (456.5s total)
+
+━━━ Iteration 35/100 (lr=0.000743) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30730 examples in 421.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6181, value=0.1603, total=0.7784 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 74.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=88.7% mae=0.395 r=0.769
+       - Test_L1_R2: acc=80.8% mae=0.615 r=0.725
+       - Test_L1_R3: acc=65.9% mae=0.504 r=0.663
+       - Test_L2_R1: acc=82.1% mae=0.608 r=0.684
+       - Test_L2_R2: acc=59.3% mae=0.658 r=0.494
+       - Test_L3_R1: acc=63.3% mae=0.540 r=0.533
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0035.pt (450.6s total)
+
+━━━ Iteration 36/100 (lr=0.000730) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30606 examples in 419.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6091, value=0.1432, total=0.7524 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 75.1%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=90.9% mae=0.368 r=0.807
+       - Test_L1_R2: acc=83.4% mae=0.605 r=0.754
+       - Test_L1_R3: acc=67.6% mae=0.526 r=0.672
+       - Test_L2_R1: acc=81.9% mae=0.617 r=0.678
+       - Test_L2_R2: acc=60.9% mae=0.662 r=0.529
+       - Test_L3_R1: acc=66.1% mae=0.517 r=0.522
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0036.pt (451.2s total)
+
+━━━ Iteration 37/100 (lr=0.000716) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30560 examples in 423.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6069, value=0.1335, total=0.7405 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 68.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=90.1% mae=0.373 r=0.795
+       - Test_L1_R2: acc=81.3% mae=0.633 r=0.721
+       - Test_L1_R3: acc=66.7% mae=0.540 r=0.666
+       - Test_L2_R1: acc=82.0% mae=0.630 r=0.670
+       - Test_L2_R2: acc=61.6% mae=0.698 r=0.509
+       - Test_L3_R1: acc=64.2% mae=0.540 r=0.516
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0037.pt (453.9s total)
+
+━━━ Iteration 38/100 (lr=0.000702) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30750 examples in 421.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6213, value=0.1386, total=0.7599 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 89.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=90.2% mae=0.369 r=0.802
+       - Test_L1_R2: acc=81.4% mae=0.600 r=0.737
+       - Test_L1_R3: acc=67.9% mae=0.489 r=0.664
+       - Test_L2_R1: acc=83.7% mae=0.605 r=0.700
+       - Test_L2_R2: acc=63.3% mae=0.677 r=0.540
+       - Test_L3_R1: acc=70.0% mae=0.514 r=0.556
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0038.pt (452.1s total)
+
+━━━ Iteration 39/100 (lr=0.000687) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30724 examples in 420.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6307, value=0.1478, total=0.7786 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 80.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.6% mae=0.340 r=0.832
+       - Test_L1_R2: acc=80.7% mae=0.606 r=0.728
+       - Test_L1_R3: acc=65.6% mae=0.503 r=0.663
+       - Test_L2_R1: acc=82.4% mae=0.599 r=0.691
+       - Test_L2_R2: acc=61.4% mae=0.643 r=0.532
+       - Test_L3_R1: acc=74.0% mae=0.422 r=0.587
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0039.pt (448.9s total)
+
+━━━ Iteration 40/100 (lr=0.000673) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30758 examples in 421.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6376, value=0.1537, total=0.7913 (13.9s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 87.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.2% mae=0.339 r=0.824
+       - Test_L1_R2: acc=82.1% mae=0.604 r=0.737
+       - Test_L1_R3: acc=64.2% mae=0.485 r=0.665
+       - Test_L2_R1: acc=82.9% mae=0.593 r=0.686
+       - Test_L2_R2: acc=62.8% mae=0.654 r=0.551
+       - Test_L3_R1: acc=72.8% mae=0.451 r=0.572
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0040.pt (452.8s total)
+
+━━━ Iteration 41/100 (lr=0.000658) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29842 examples in 403.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6418, value=0.1493, total=0.7911 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 90.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=89.5% mae=0.377 r=0.801
+       - Test_L1_R2: acc=82.3% mae=0.624 r=0.736
+       - Test_L1_R3: acc=64.5% mae=0.509 r=0.661
+       - Test_L2_R1: acc=81.8% mae=0.598 r=0.690
+       - Test_L2_R2: acc=60.7% mae=0.658 r=0.540
+       - Test_L3_R1: acc=69.8% mae=0.466 r=0.553
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0041.pt (431.8s total)
+
+━━━ Iteration 42/100 (lr=0.000643) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30608 examples in 418.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6378, value=0.1528, total=0.7906 (13.6s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.9% mae=0.343 r=0.846
+       - Test_L1_R2: acc=82.4% mae=0.606 r=0.758
+       - Test_L1_R3: acc=68.3% mae=0.526 r=0.703
+       - Test_L2_R1: acc=82.3% mae=0.583 r=0.694
+       - Test_L2_R2: acc=62.5% mae=0.638 r=0.547
+       - Test_L3_R1: acc=68.8% mae=0.470 r=0.527
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 0 - 40 Previous Model (Draws: 0)
+     Breakdown (New Model): 0 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 20 wins as P2
+     New Model Winrate: 0.0%
+  💾 Saved: checkpoints/checkpoint_0042.pt (450.1s total)
+
+━━━ Iteration 43/100 (lr=0.000628) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 31434 examples in 420.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6206, value=0.1390, total=0.7596 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 96.1%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.6% mae=0.337 r=0.847
+       - Test_L1_R2: acc=82.5% mae=0.590 r=0.761
+       - Test_L1_R3: acc=68.8% mae=0.485 r=0.716
+       - Test_L2_R1: acc=83.9% mae=0.557 r=0.713
+       - Test_L2_R2: acc=64.0% mae=0.623 r=0.548
+       - Test_L3_R1: acc=70.0% mae=0.450 r=0.531
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0043.pt (452.4s total)
+
+━━━ Iteration 44/100 (lr=0.000613) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30582 examples in 419.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6084, value=0.1376, total=0.7460 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.9% mae=0.329 r=0.850
+       - Test_L1_R2: acc=82.2% mae=0.586 r=0.758
+       - Test_L1_R3: acc=66.5% mae=0.447 r=0.682
+       - Test_L2_R1: acc=83.7% mae=0.583 r=0.701
+       - Test_L2_R2: acc=63.9% mae=0.653 r=0.554
+       - Test_L3_R1: acc=69.3% mae=0.450 r=0.545
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0044.pt (451.0s total)
+
+━━━ Iteration 45/100 (lr=0.000598) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30840 examples in 425.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6036, value=0.1368, total=0.7404 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 90.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.0% mae=0.325 r=0.868
+       - Test_L1_R2: acc=84.9% mae=0.573 r=0.792
+       - Test_L1_R3: acc=64.4% mae=0.423 r=0.680
+       - Test_L2_R1: acc=82.9% mae=0.594 r=0.706
+       - Test_L2_R2: acc=62.3% mae=0.643 r=0.531
+       - Test_L3_R1: acc=65.7% mae=0.525 r=0.524
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0045.pt (455.2s total)
+
+━━━ Iteration 46/100 (lr=0.000582) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30136 examples in 432.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6109, value=0.1452, total=0.7561 (14.2s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 85.8%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.3% mae=0.323 r=0.868
+       - Test_L1_R2: acc=84.9% mae=0.571 r=0.791
+       - Test_L1_R3: acc=65.0% mae=0.434 r=0.689
+       - Test_L2_R1: acc=83.1% mae=0.593 r=0.705
+       - Test_L2_R2: acc=61.9% mae=0.633 r=0.550
+       - Test_L3_R1: acc=67.9% mae=0.509 r=0.540
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0046.pt (464.4s total)
+
+━━━ Iteration 47/100 (lr=0.000567) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30424 examples in 470.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6156, value=0.1457, total=0.7613 (13.7s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 86.1%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.0% mae=0.357 r=0.839
+       - Test_L1_R2: acc=83.5% mae=0.630 r=0.788
+       - Test_L1_R3: acc=64.1% mae=0.499 r=0.686
+       - Test_L2_R1: acc=82.7% mae=0.614 r=0.696
+       - Test_L2_R2: acc=60.5% mae=0.698 r=0.533
+       - Test_L3_R1: acc=66.2% mae=0.527 r=0.488
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0047.pt (502.0s total)
+
+━━━ Iteration 48/100 (lr=0.000552) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30666 examples in 406.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6117, value=0.1420, total=0.7537 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 78.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.8% mae=0.327 r=0.865
+       - Test_L1_R2: acc=84.9% mae=0.623 r=0.774
+       - Test_L1_R3: acc=66.6% mae=0.492 r=0.694
+       - Test_L2_R1: acc=83.2% mae=0.592 r=0.707
+       - Test_L2_R2: acc=61.7% mae=0.656 r=0.544
+       - Test_L3_R1: acc=70.2% mae=0.510 r=0.520
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0048.pt (436.6s total)
+
+━━━ Iteration 49/100 (lr=0.000536) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30032 examples in 407.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6145, value=0.1277, total=0.7423 (13.5s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 85.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.4% mae=0.341 r=0.847
+       - Test_L1_R2: acc=83.7% mae=0.617 r=0.772
+       - Test_L1_R3: acc=67.2% mae=0.506 r=0.702
+       - Test_L2_R1: acc=83.4% mae=0.591 r=0.702
+       - Test_L2_R2: acc=61.8% mae=0.668 r=0.538
+       - Test_L3_R1: acc=65.9% mae=0.541 r=0.510
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0049.pt (436.2s total)
+
+━━━ Iteration 50/100 (lr=0.000521) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30216 examples in 400.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6103, value=0.1197, total=0.7299 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.2% mae=0.334 r=0.863
+       - Test_L1_R2: acc=84.5% mae=0.624 r=0.787
+       - Test_L1_R3: acc=68.1% mae=0.519 r=0.706
+       - Test_L2_R1: acc=84.5% mae=0.596 r=0.717
+       - Test_L2_R2: acc=60.9% mae=0.681 r=0.528
+       - Test_L3_R1: acc=67.1% mae=0.525 r=0.527
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0050.pt (430.6s total)
+
+━━━ Iteration 51/100 (lr=0.000505) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29550 examples in 397.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6268, value=0.1190, total=0.7458 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.0% mae=0.327 r=0.867
+       - Test_L1_R2: acc=85.9% mae=0.605 r=0.801
+       - Test_L1_R3: acc=66.2% mae=0.506 r=0.706
+       - Test_L2_R1: acc=82.7% mae=0.586 r=0.709
+       - Test_L2_R2: acc=62.5% mae=0.639 r=0.533
+       - Test_L3_R1: acc=71.7% mae=0.474 r=0.568
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0051.pt (426.1s total)
+
+━━━ Iteration 52/100 (lr=0.000489) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29138 examples in 391.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6288, value=0.1211, total=0.7499 (13.6s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.2% mae=0.323 r=0.870
+       - Test_L1_R2: acc=84.3% mae=0.581 r=0.774
+       - Test_L1_R3: acc=66.8% mae=0.489 r=0.678
+       - Test_L2_R1: acc=82.6% mae=0.593 r=0.708
+       - Test_L2_R2: acc=60.7% mae=0.636 r=0.544
+       - Test_L3_R1: acc=71.4% mae=0.477 r=0.559
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0052.pt (423.2s total)
+
+━━━ Iteration 53/100 (lr=0.000474) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 30078 examples in 421.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6344, value=0.1311, total=0.7656 (13.6s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.9% mae=0.335 r=0.864
+       - Test_L1_R2: acc=84.8% mae=0.608 r=0.783
+       - Test_L1_R3: acc=67.1% mae=0.503 r=0.692
+       - Test_L2_R1: acc=83.4% mae=0.593 r=0.713
+       - Test_L2_R2: acc=61.7% mae=0.653 r=0.543
+       - Test_L3_R1: acc=71.1% mae=0.492 r=0.564
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0053.pt (452.3s total)
+
+━━━ Iteration 54/100 (lr=0.000458) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29680 examples in 403.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6322, value=0.1261, total=0.7583 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.1%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.3% mae=0.334 r=0.860
+       - Test_L1_R2: acc=83.8% mae=0.604 r=0.762
+       - Test_L1_R3: acc=68.0% mae=0.484 r=0.698
+       - Test_L2_R1: acc=83.5% mae=0.601 r=0.703
+       - Test_L2_R2: acc=64.1% mae=0.636 r=0.553
+       - Test_L3_R1: acc=70.5% mae=0.491 r=0.568
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0054.pt (432.3s total)
+
+━━━ Iteration 55/100 (lr=0.000443) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28854 examples in 392.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6344, value=0.1286, total=0.7631 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=90.6% mae=0.348 r=0.823
+       - Test_L1_R2: acc=80.8% mae=0.552 r=0.750
+       - Test_L1_R3: acc=65.7% mae=0.445 r=0.691
+       - Test_L2_R1: acc=83.5% mae=0.589 r=0.705
+       - Test_L2_R2: acc=62.5% mae=0.628 r=0.552
+       - Test_L3_R1: acc=70.2% mae=0.496 r=0.573
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0055.pt (422.8s total)
+
+━━━ Iteration 56/100 (lr=0.000428) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29710 examples in 400.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6467, value=0.1280, total=0.7747 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.6% mae=0.339 r=0.843
+       - Test_L1_R2: acc=82.8% mae=0.592 r=0.760
+       - Test_L1_R3: acc=68.9% mae=0.485 r=0.690
+       - Test_L2_R1: acc=85.1% mae=0.592 r=0.717
+       - Test_L2_R2: acc=64.6% mae=0.653 r=0.563
+       - Test_L3_R1: acc=73.9% mae=0.465 r=0.588
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0056.pt (430.2s total)
+
+━━━ Iteration 57/100 (lr=0.000412) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29048 examples in 395.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6512, value=0.1364, total=0.7876 (13.5s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 91.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.7% mae=0.333 r=0.840
+       - Test_L1_R2: acc=80.9% mae=0.557 r=0.758
+       - Test_L1_R3: acc=67.8% mae=0.451 r=0.711
+       - Test_L2_R1: acc=83.9% mae=0.578 r=0.717
+       - Test_L2_R2: acc=64.5% mae=0.631 r=0.574
+       - Test_L3_R1: acc=73.1% mae=0.459 r=0.582
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0057.pt (426.7s total)
+
+━━━ Iteration 58/100 (lr=0.000397) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29610 examples in 398.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6565, value=0.1407, total=0.7972 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 90.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.6% mae=0.323 r=0.854
+       - Test_L1_R2: acc=82.3% mae=0.570 r=0.759
+       - Test_L1_R3: acc=68.6% mae=0.461 r=0.695
+       - Test_L2_R1: acc=83.8% mae=0.586 r=0.706
+       - Test_L2_R2: acc=64.0% mae=0.646 r=0.572
+       - Test_L3_R1: acc=71.1% mae=0.505 r=0.577
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0058.pt (428.3s total)
+
+━━━ Iteration 59/100 (lr=0.000382) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29058 examples in 391.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6426, value=0.1315, total=0.7741 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 85.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.2% mae=0.338 r=0.850
+       - Test_L1_R2: acc=85.0% mae=0.573 r=0.786
+       - Test_L1_R3: acc=69.5% mae=0.456 r=0.722
+       - Test_L2_R1: acc=84.5% mae=0.582 r=0.722
+       - Test_L2_R2: acc=65.2% mae=0.632 r=0.588
+       - Test_L3_R1: acc=74.8% mae=0.458 r=0.587
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0059.pt (420.0s total)
+
+━━━ Iteration 60/100 (lr=0.000367) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29552 examples in 397.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6334, value=0.1316, total=0.7650 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 84.1%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.9% mae=0.331 r=0.862
+       - Test_L1_R2: acc=84.3% mae=0.596 r=0.791
+       - Test_L1_R3: acc=70.1% mae=0.469 r=0.735
+       - Test_L2_R1: acc=83.8% mae=0.593 r=0.717
+       - Test_L2_R2: acc=63.7% mae=0.631 r=0.574
+       - Test_L3_R1: acc=71.7% mae=0.480 r=0.595
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0060.pt (427.9s total)
+
+━━━ Iteration 61/100 (lr=0.000352) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29590 examples in 400.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6336, value=0.1256, total=0.7593 (13.5s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 89.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.5% mae=0.333 r=0.865
+       - Test_L1_R2: acc=86.0% mae=0.620 r=0.802
+       - Test_L1_R3: acc=71.0% mae=0.501 r=0.742
+       - Test_L2_R1: acc=83.7% mae=0.603 r=0.717
+       - Test_L2_R2: acc=63.3% mae=0.669 r=0.566
+       - Test_L3_R1: acc=71.1% mae=0.508 r=0.565
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0061.pt (432.4s total)
+
+━━━ Iteration 62/100 (lr=0.000337) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 29132 examples in 390.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6240, value=0.1230, total=0.7469 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.1% mae=0.346 r=0.850
+       - Test_L1_R2: acc=86.5% mae=0.618 r=0.807
+       - Test_L1_R3: acc=70.7% mae=0.496 r=0.752
+       - Test_L2_R1: acc=85.5% mae=0.594 r=0.730
+       - Test_L2_R2: acc=64.7% mae=0.658 r=0.580
+       - Test_L3_R1: acc=70.9% mae=0.525 r=0.586
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0062.pt (421.0s total)
+
+━━━ Iteration 63/100 (lr=0.000323) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28414 examples in 415.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6307, value=0.1153, total=0.7460 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.2% mae=0.351 r=0.853
+       - Test_L1_R2: acc=87.1% mae=0.638 r=0.816
+       - Test_L1_R3: acc=69.9% mae=0.540 r=0.750
+       - Test_L2_R1: acc=85.0% mae=0.606 r=0.722
+       - Test_L2_R2: acc=63.3% mae=0.675 r=0.570
+       - Test_L3_R1: acc=68.6% mae=0.547 r=0.564
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0063.pt (446.6s total)
+
+━━━ Iteration 64/100 (lr=0.000308) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27966 examples in 386.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6361, value=0.1276, total=0.7636 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.0% mae=0.333 r=0.867
+       - Test_L1_R2: acc=86.1% mae=0.615 r=0.804
+       - Test_L1_R3: acc=69.0% mae=0.526 r=0.738
+       - Test_L2_R1: acc=84.9% mae=0.602 r=0.718
+       - Test_L2_R2: acc=64.5% mae=0.670 r=0.571
+       - Test_L3_R1: acc=71.1% mae=0.529 r=0.579
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0064.pt (417.7s total)
+
+━━━ Iteration 65/100 (lr=0.000294) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27866 examples in 379.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6530, value=0.1147, total=0.7677 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.4% mae=0.356 r=0.847
+       - Test_L1_R2: acc=86.1% mae=0.617 r=0.795
+       - Test_L1_R3: acc=69.5% mae=0.487 r=0.744
+       - Test_L2_R1: acc=84.9% mae=0.597 r=0.726
+       - Test_L2_R2: acc=63.6% mae=0.681 r=0.564
+       - Test_L3_R1: acc=70.3% mae=0.533 r=0.597
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0065.pt (409.8s total)
+
+━━━ Iteration 66/100 (lr=0.000280) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28640 examples in 385.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6629, value=0.1118, total=0.7746 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.4% mae=0.360 r=0.842
+       - Test_L1_R2: acc=84.2% mae=0.623 r=0.793
+       - Test_L1_R3: acc=69.7% mae=0.481 r=0.728
+       - Test_L2_R1: acc=84.1% mae=0.605 r=0.716
+       - Test_L2_R2: acc=63.0% mae=0.682 r=0.549
+       - Test_L3_R1: acc=69.4% mae=0.528 r=0.587
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0066.pt (416.0s total)
+
+━━━ Iteration 67/100 (lr=0.000267) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28396 examples in 381.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6604, value=0.1082, total=0.7686 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.8% mae=0.351 r=0.854
+       - Test_L1_R2: acc=84.4% mae=0.631 r=0.784
+       - Test_L1_R3: acc=69.6% mae=0.519 r=0.709
+       - Test_L2_R1: acc=84.0% mae=0.607 r=0.716
+       - Test_L2_R2: acc=64.1% mae=0.691 r=0.562
+       - Test_L3_R1: acc=71.4% mae=0.516 r=0.594
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0067.pt (412.3s total)
+
+━━━ Iteration 68/100 (lr=0.000253) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27988 examples in 379.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6545, value=0.1019, total=0.7564 (13.3s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=90.8% mae=0.364 r=0.835
+       - Test_L1_R2: acc=84.0% mae=0.610 r=0.780
+       - Test_L1_R3: acc=65.7% mae=0.494 r=0.702
+       - Test_L2_R1: acc=82.5% mae=0.611 r=0.706
+       - Test_L2_R2: acc=63.4% mae=0.678 r=0.554
+       - Test_L3_R1: acc=68.7% mae=0.536 r=0.577
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0068.pt (409.6s total)
+
+━━━ Iteration 69/100 (lr=0.000240) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27960 examples in 384.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6528, value=0.1070, total=0.7598 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.9% mae=0.362 r=0.844
+       - Test_L1_R2: acc=84.1% mae=0.621 r=0.773
+       - Test_L1_R3: acc=65.7% mae=0.505 r=0.682
+       - Test_L2_R1: acc=83.7% mae=0.609 r=0.713
+       - Test_L2_R2: acc=64.2% mae=0.683 r=0.547
+       - Test_L3_R1: acc=70.9% mae=0.541 r=0.576
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0069.pt (415.8s total)
+
+━━━ Iteration 70/100 (lr=0.000227) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28448 examples in 396.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6478, value=0.1109, total=0.7588 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=91.0% mae=0.358 r=0.835
+       - Test_L1_R2: acc=82.0% mae=0.597 r=0.747
+       - Test_L1_R3: acc=65.1% mae=0.489 r=0.678
+       - Test_L2_R1: acc=83.9% mae=0.598 r=0.711
+       - Test_L2_R2: acc=63.3% mae=0.678 r=0.534
+       - Test_L3_R1: acc=72.1% mae=0.526 r=0.586
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0070.pt (427.5s total)
+
+━━━ Iteration 71/100 (lr=0.000214) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27504 examples in 390.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6532, value=0.1057, total=0.7589 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=90.6% mae=0.368 r=0.827
+       - Test_L1_R2: acc=82.0% mae=0.614 r=0.754
+       - Test_L1_R3: acc=66.2% mae=0.492 r=0.684
+       - Test_L2_R1: acc=83.9% mae=0.612 r=0.711
+       - Test_L2_R2: acc=63.5% mae=0.689 r=0.544
+       - Test_L3_R1: acc=69.4% mae=0.550 r=0.565
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0071.pt (421.7s total)
+
+━━━ Iteration 72/100 (lr=0.000202) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28398 examples in 393.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6555, value=0.1014, total=0.7569 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.5% mae=0.350 r=0.848
+       - Test_L1_R2: acc=83.2% mae=0.621 r=0.769
+       - Test_L1_R3: acc=67.4% mae=0.503 r=0.709
+       - Test_L2_R1: acc=84.6% mae=0.605 r=0.713
+       - Test_L2_R2: acc=62.8% mae=0.685 r=0.549
+       - Test_L3_R1: acc=70.4% mae=0.528 r=0.573
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0072.pt (426.1s total)
+
+━━━ Iteration 73/100 (lr=0.000189) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27556 examples in 383.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6517, value=0.0915, total=0.7431 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.4% mae=0.347 r=0.860
+       - Test_L1_R2: acc=84.7% mae=0.642 r=0.783
+       - Test_L1_R3: acc=70.2% mae=0.536 r=0.719
+       - Test_L2_R1: acc=84.6% mae=0.613 r=0.717
+       - Test_L2_R2: acc=64.3% mae=0.687 r=0.568
+       - Test_L3_R1: acc=71.0% mae=0.536 r=0.570
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0073.pt (414.4s total)
+
+━━━ Iteration 74/100 (lr=0.000178) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26558 examples in 376.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6485, value=0.1012, total=0.7497 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.1% mae=0.344 r=0.860
+       - Test_L1_R2: acc=85.6% mae=0.641 r=0.789
+       - Test_L1_R3: acc=69.2% mae=0.549 r=0.716
+       - Test_L2_R1: acc=85.9% mae=0.593 r=0.736
+       - Test_L2_R2: acc=64.5% mae=0.671 r=0.572
+       - Test_L3_R1: acc=70.4% mae=0.529 r=0.579
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0074.pt (405.5s total)
+
+━━━ Iteration 75/100 (lr=0.000166) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27990 examples in 388.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6550, value=0.0996, total=0.7545 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.7% mae=0.339 r=0.863
+       - Test_L1_R2: acc=85.2% mae=0.633 r=0.793
+       - Test_L1_R3: acc=69.1% mae=0.524 r=0.723
+       - Test_L2_R1: acc=85.6% mae=0.581 r=0.742
+       - Test_L2_R2: acc=65.2% mae=0.648 r=0.574
+       - Test_L3_R1: acc=71.1% mae=0.513 r=0.584
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0075.pt (419.0s total)
+
+━━━ Iteration 76/100 (lr=0.000155) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27156 examples in 384.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6661, value=0.1063, total=0.7724 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 96.6%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.1% mae=0.342 r=0.859
+       - Test_L1_R2: acc=84.4% mae=0.634 r=0.789
+       - Test_L1_R3: acc=69.3% mae=0.516 r=0.720
+       - Test_L2_R1: acc=84.6% mae=0.599 r=0.729
+       - Test_L2_R2: acc=64.4% mae=0.674 r=0.553
+       - Test_L3_R1: acc=70.0% mae=0.519 r=0.575
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0076.pt (413.3s total)
+
+━━━ Iteration 77/100 (lr=0.000144) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27210 examples in 382.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6830, value=0.1084, total=0.7914 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 96.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.3% mae=0.342 r=0.860
+       - Test_L1_R2: acc=84.4% mae=0.625 r=0.779
+       - Test_L1_R3: acc=68.5% mae=0.498 r=0.704
+       - Test_L2_R1: acc=85.5% mae=0.596 r=0.731
+       - Test_L2_R2: acc=63.2% mae=0.683 r=0.540
+       - Test_L3_R1: acc=71.2% mae=0.510 r=0.591
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0077.pt (412.7s total)
+
+━━━ Iteration 78/100 (lr=0.000134) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27040 examples in 384.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6907, value=0.1116, total=0.8023 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.6% mae=0.342 r=0.855
+       - Test_L1_R2: acc=84.2% mae=0.620 r=0.774
+       - Test_L1_R3: acc=67.9% mae=0.506 r=0.694
+       - Test_L2_R1: acc=86.1% mae=0.590 r=0.735
+       - Test_L2_R2: acc=62.5% mae=0.679 r=0.539
+       - Test_L3_R1: acc=71.8% mae=0.508 r=0.590
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 0 Previous Model (Draws: 20)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 0 wins as P1, 0 wins as P2
+     New Model Winrate: 75.0%
+  💾 Saved: checkpoints/checkpoint_0078.pt (416.0s total)
+
+━━━ Iteration 79/100 (lr=0.000124) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26876 examples in 383.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7044, value=0.1102, total=0.8146 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 96.5%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.8% mae=0.349 r=0.850
+       - Test_L1_R2: acc=84.1% mae=0.628 r=0.771
+       - Test_L1_R3: acc=66.5% mae=0.526 r=0.691
+       - Test_L2_R1: acc=84.8% mae=0.596 r=0.724
+       - Test_L2_R2: acc=62.7% mae=0.685 r=0.529
+       - Test_L3_R1: acc=72.6% mae=0.501 r=0.583
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0079.pt (411.7s total)
+
+━━━ Iteration 80/100 (lr=0.000114) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27566 examples in 388.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7074, value=0.1149, total=0.8223 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.7% mae=0.353 r=0.844
+       - Test_L1_R2: acc=83.7% mae=0.629 r=0.768
+       - Test_L1_R3: acc=66.0% mae=0.534 r=0.678
+       - Test_L2_R1: acc=84.4% mae=0.598 r=0.723
+       - Test_L2_R2: acc=63.2% mae=0.694 r=0.541
+       - Test_L3_R1: acc=71.4% mae=0.509 r=0.592
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0080.pt (416.9s total)
+
+━━━ Iteration 81/100 (lr=0.000105) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27382 examples in 386.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7014, value=0.1181, total=0.8194 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=92.6% mae=0.341 r=0.854
+       - Test_L1_R2: acc=84.3% mae=0.616 r=0.780
+       - Test_L1_R3: acc=67.4% mae=0.507 r=0.692
+       - Test_L2_R1: acc=84.9% mae=0.587 r=0.723
+       - Test_L2_R2: acc=64.9% mae=0.666 r=0.556
+       - Test_L3_R1: acc=72.3% mae=0.481 r=0.595
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0081.pt (417.1s total)
+
+━━━ Iteration 82/100 (lr=0.000096) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27184 examples in 385.7s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6939, value=0.1096, total=0.8035 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.2% mae=0.345 r=0.859
+       - Test_L1_R2: acc=84.8% mae=0.629 r=0.789
+       - Test_L1_R3: acc=68.1% mae=0.534 r=0.698
+       - Test_L2_R1: acc=84.9% mae=0.594 r=0.721
+       - Test_L2_R2: acc=63.7% mae=0.686 r=0.548
+       - Test_L3_R1: acc=72.7% mae=0.491 r=0.590
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0082.pt (417.6s total)
+
+━━━ Iteration 83/100 (lr=0.000087) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27660 examples in 389.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6923, value=0.1173, total=0.8097 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 96.8%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.1% mae=0.349 r=0.858
+       - Test_L1_R2: acc=85.0% mae=0.642 r=0.784
+       - Test_L1_R3: acc=66.8% mae=0.553 r=0.693
+       - Test_L2_R1: acc=84.5% mae=0.596 r=0.722
+       - Test_L2_R2: acc=63.4% mae=0.695 r=0.540
+       - Test_L3_R1: acc=71.4% mae=0.493 r=0.576
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0083.pt (420.9s total)
+
+━━━ Iteration 84/100 (lr=0.000079) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27074 examples in 381.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6937, value=0.1222, total=0.8159 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.3% mae=0.342 r=0.866
+       - Test_L1_R2: acc=84.3% mae=0.641 r=0.787
+       - Test_L1_R3: acc=66.5% mae=0.546 r=0.696
+       - Test_L2_R1: acc=84.3% mae=0.593 r=0.721
+       - Test_L2_R2: acc=63.0% mae=0.698 r=0.544
+       - Test_L3_R1: acc=69.6% mae=0.513 r=0.558
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0084.pt (411.7s total)
+
+━━━ Iteration 85/100 (lr=0.000071) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 28662 examples in 397.9s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6825, value=0.1127, total=0.7953 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 97.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.7% mae=0.341 r=0.870
+       - Test_L1_R2: acc=85.4% mae=0.647 r=0.788
+       - Test_L1_R3: acc=67.5% mae=0.552 r=0.710
+       - Test_L2_R1: acc=84.7% mae=0.596 r=0.724
+       - Test_L2_R2: acc=63.6% mae=0.698 r=0.550
+       - Test_L3_R1: acc=69.5% mae=0.520 r=0.561
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0085.pt (429.1s total)
+
+━━━ Iteration 86/100 (lr=0.000064) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26776 examples in 381.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6855, value=0.1155, total=0.8010 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.8%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.0% mae=0.339 r=0.868
+       - Test_L1_R2: acc=84.5% mae=0.643 r=0.788
+       - Test_L1_R3: acc=68.3% mae=0.559 r=0.708
+       - Test_L2_R1: acc=85.3% mae=0.588 r=0.728
+       - Test_L2_R2: acc=63.4% mae=0.687 r=0.555
+       - Test_L3_R1: acc=69.2% mae=0.529 r=0.558
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0086.pt (412.3s total)
+
+━━━ Iteration 87/100 (lr=0.000057) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26638 examples in 374.0s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6921, value=0.1103, total=0.8025 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.1% mae=0.343 r=0.869
+       - Test_L1_R2: acc=85.0% mae=0.653 r=0.790
+       - Test_L1_R3: acc=68.4% mae=0.568 r=0.721
+       - Test_L2_R1: acc=84.3% mae=0.596 r=0.728
+       - Test_L2_R2: acc=65.3% mae=0.703 r=0.559
+       - Test_L3_R1: acc=70.4% mae=0.521 r=0.567
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0087.pt (405.9s total)
+
+━━━ Iteration 88/100 (lr=0.000051) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27388 examples in 386.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.6980, value=0.1074, total=0.8054 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.0% mae=0.339 r=0.872
+       - Test_L1_R2: acc=85.2% mae=0.655 r=0.789
+       - Test_L1_R3: acc=68.9% mae=0.569 r=0.720
+       - Test_L2_R1: acc=84.7% mae=0.593 r=0.728
+       - Test_L2_R2: acc=64.8% mae=0.697 r=0.560
+       - Test_L3_R1: acc=71.3% mae=0.522 r=0.570
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0088.pt (418.8s total)
+
+━━━ Iteration 89/100 (lr=0.000045) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27388 examples in 386.2s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7091, value=0.1051, total=0.8142 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.2%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.0% mae=0.340 r=0.874
+       - Test_L1_R2: acc=86.0% mae=0.656 r=0.798
+       - Test_L1_R3: acc=69.5% mae=0.575 r=0.727
+       - Test_L2_R1: acc=85.2% mae=0.589 r=0.737
+       - Test_L2_R2: acc=64.2% mae=0.694 r=0.563
+       - Test_L3_R1: acc=71.2% mae=0.511 r=0.580
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0089.pt (417.6s total)
+
+━━━ Iteration 90/100 (lr=0.000039) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27216 examples in 383.6s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7158, value=0.0962, total=0.8121 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 95.0%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.9% mae=0.341 r=0.875
+       - Test_L1_R2: acc=86.4% mae=0.654 r=0.805
+       - Test_L1_R3: acc=69.1% mae=0.573 r=0.733
+       - Test_L2_R1: acc=85.5% mae=0.593 r=0.739
+       - Test_L2_R2: acc=64.7% mae=0.694 r=0.564
+       - Test_L3_R1: acc=71.4% mae=0.523 r=0.577
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0090.pt (415.1s total)
+
+━━━ Iteration 91/100 (lr=0.000034) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26638 examples in 375.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7211, value=0.1034, total=0.8245 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 94.3%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.8% mae=0.341 r=0.871
+       - Test_L1_R2: acc=85.5% mae=0.641 r=0.802
+       - Test_L1_R3: acc=68.9% mae=0.547 r=0.733
+       - Test_L2_R1: acc=84.7% mae=0.589 r=0.736
+       - Test_L2_R2: acc=64.7% mae=0.677 r=0.565
+       - Test_L3_R1: acc=72.3% mae=0.501 r=0.578
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0091.pt (406.6s total)
+
+━━━ Iteration 92/100 (lr=0.000030) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27142 examples in 375.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7174, value=0.1065, total=0.8239 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 91.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.3% mae=0.334 r=0.876
+       - Test_L1_R2: acc=85.4% mae=0.631 r=0.804
+       - Test_L1_R3: acc=68.7% mae=0.538 r=0.725
+       - Test_L2_R1: acc=85.4% mae=0.587 r=0.737
+       - Test_L2_R2: acc=64.5% mae=0.668 r=0.566
+       - Test_L3_R1: acc=71.9% mae=0.504 r=0.583
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0092.pt (406.2s total)
+
+━━━ Iteration 93/100 (lr=0.000026) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26948 examples in 369.3s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7291, value=0.1113, total=0.8404 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.3% mae=0.335 r=0.876
+       - Test_L1_R2: acc=85.6% mae=0.632 r=0.804
+       - Test_L1_R3: acc=70.3% mae=0.534 r=0.731
+       - Test_L2_R1: acc=85.6% mae=0.590 r=0.736
+       - Test_L2_R2: acc=65.3% mae=0.663 r=0.571
+       - Test_L3_R1: acc=72.0% mae=0.505 r=0.585
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0093.pt (400.4s total)
+
+━━━ Iteration 94/100 (lr=0.000022) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 27228 examples in 371.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7239, value=0.1146, total=0.8385 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 93.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.1% mae=0.337 r=0.871
+       - Test_L1_R2: acc=86.0% mae=0.629 r=0.803
+       - Test_L1_R3: acc=70.1% mae=0.529 r=0.735
+       - Test_L2_R1: acc=85.4% mae=0.590 r=0.735
+       - Test_L2_R2: acc=64.7% mae=0.665 r=0.570
+       - Test_L3_R1: acc=72.7% mae=0.504 r=0.585
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0094.pt (402.2s total)
+
+━━━ Iteration 95/100 (lr=0.000019) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26766 examples in 365.9s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7250, value=0.1225, total=0.8475 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.4%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.7% mae=0.335 r=0.871
+       - Test_L1_R2: acc=86.1% mae=0.625 r=0.803
+       - Test_L1_R3: acc=69.9% mae=0.529 r=0.736
+       - Test_L2_R1: acc=85.5% mae=0.591 r=0.736
+       - Test_L2_R2: acc=64.4% mae=0.661 r=0.571
+       - Test_L3_R1: acc=72.5% mae=0.512 r=0.580
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0095.pt (397.5s total)
+
+━━━ Iteration 96/100 (lr=0.000016) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26076 examples in 395.8s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7462, value=0.1339, total=0.8801 (13.8s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 92.1%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.9% mae=0.333 r=0.872
+       - Test_L1_R2: acc=86.2% mae=0.623 r=0.805
+       - Test_L1_R3: acc=70.0% mae=0.528 r=0.745
+       - Test_L2_R1: acc=85.5% mae=0.583 r=0.738
+       - Test_L2_R2: acc=65.6% mae=0.647 r=0.579
+       - Test_L3_R1: acc=72.9% mae=0.496 r=0.584
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0096.pt (428.6s total)
+
+━━━ Iteration 97/100 (lr=0.000014) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 25828 examples in 361.4s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7556, value=0.1411, total=0.8967 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 90.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.2% mae=0.330 r=0.876
+       - Test_L1_R2: acc=86.2% mae=0.624 r=0.807
+       - Test_L1_R3: acc=69.0% mae=0.534 r=0.746
+       - Test_L2_R1: acc=85.8% mae=0.580 r=0.745
+       - Test_L2_R2: acc=65.7% mae=0.641 r=0.582
+       - Test_L3_R1: acc=72.0% mae=0.504 r=0.582
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0097.pt (393.4s total)
+
+━━━ Iteration 98/100 (lr=0.000012) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 25332 examples in 355.1s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7845, value=0.1547, total=0.9393 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 88.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.1% mae=0.328 r=0.875
+       - Test_L1_R2: acc=86.2% mae=0.612 r=0.809
+       - Test_L1_R3: acc=68.8% mae=0.522 r=0.749
+       - Test_L2_R1: acc=85.8% mae=0.573 r=0.749
+       - Test_L2_R2: acc=65.0% mae=0.624 r=0.590
+       - Test_L3_R1: acc=73.0% mae=0.492 r=0.591
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0098.pt (387.5s total)
+
+━━━ Iteration 99/100 (lr=0.000011) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 26812 examples in 369.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7892, value=0.1544, total=0.9436 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 89.9%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=94.0% mae=0.328 r=0.874
+       - Test_L1_R2: acc=86.1% mae=0.612 r=0.813
+       - Test_L1_R3: acc=69.2% mae=0.521 r=0.751
+       - Test_L2_R1: acc=86.0% mae=0.575 r=0.747
+       - Test_L2_R2: acc=65.5% mae=0.628 r=0.590
+       - Test_L3_R1: acc=72.3% mae=0.495 r=0.588
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0099.pt (401.6s total)
+
+━━━ Iteration 100/100 (lr=0.000010) ━━━
+  🎲 Self-play: 500 games, 2400 sims/move ...
+     Generated 25868 examples in 363.5s (buffer: 100000)
+  🧠 Training: 2 epochs × 390 batches ...
+     Loss: policy=0.7828, value=0.1627, total=0.9456 (13.4s)
+  📊 Evaluation ...
+     ✅ Opening Move: played column 4 (Center visits: 89.7%)
+     Dataset Evaluation:
+       - Test_L1_R1: acc=93.9% mae=0.327 r=0.876
+       - Test_L1_R2: acc=86.3% mae=0.611 r=0.812
+       - Test_L1_R3: acc=68.9% mae=0.520 r=0.750
+       - Test_L2_R1: acc=86.5% mae=0.571 r=0.749
+       - Test_L2_R2: acc=65.4% mae=0.626 r=0.596
+       - Test_L3_R1: acc=73.4% mae=0.491 r=0.593
+  ⚔️ Arena: New Model vs Previous Model (40 games) ...
+     Result: New Model 20 - 20 Previous Model (Draws: 0)
+     Breakdown (New Model): 20 wins as P1, 0 wins as P2
+     Breakdown (Prev Model): 20 wins as P1, 0 wins as P2
+     New Model Winrate: 50.0%
+  💾 Saved: checkpoints/checkpoint_0100.pt (395.6s total)
+
+✅ Training complete!
+   Latest checkpoint: checkpoints/checkpoint_0100.pt

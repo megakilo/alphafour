@@ -8,6 +8,7 @@ from collections import deque
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.cuda.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from .model import AlphaZeroNet

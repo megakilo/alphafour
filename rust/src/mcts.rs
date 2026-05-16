@@ -2,6 +2,9 @@
 ///
 /// Nodes are stored in a contiguous Vec (arena allocation) and referenced
 /// by index, avoiding heap fragmentation and borrow checker issues.
+///
+/// Supports virtual losses for parallel leaf collection: multiple leaves
+/// can be selected simultaneously without duplicating paths.
 
 use crate::game::{ConnectFour, COLS};
 use rand_distr::{Dirichlet, Distribution};
@@ -14,6 +17,8 @@ pub struct MCTSNode {
     pub total_value: f64,
     pub prior: f32,
     pub is_expanded: bool,
+    /// Virtual losses currently applied (for parallel leaf selection).
+    pub virtual_losses: u32,
 }
 
 pub struct MCTSTree {
@@ -31,6 +36,7 @@ impl MCTSTree {
             total_value: 0.0,
             prior: 0.0,
             is_expanded: false,
+            virtual_losses: 0,
         };
         MCTSTree { nodes: vec![root] }
     }
@@ -41,6 +47,7 @@ impl MCTSTree {
     }
 
     /// Select a leaf node by traversing from root using UCB.
+    /// Virtual losses are respected during selection.
     pub fn select_leaf(&self, root: usize, c_puct: f32) -> usize {
         let mut idx = root;
         loop {
@@ -52,23 +59,28 @@ impl MCTSTree {
         }
     }
 
-    /// Select child with highest UCB score.
+    /// Select child with highest UCB score, accounting for virtual losses.
     fn best_child(&self, parent_idx: usize, c_puct: f32) -> usize {
         let parent = &self.nodes[parent_idx];
-        let sqrt_parent = (parent.visit_count.max(1) as f64).sqrt();
+        let effective_parent_visits = parent.visit_count + parent.virtual_losses;
+        let sqrt_parent = (effective_parent_visits.max(1) as f64).sqrt();
 
         let mut best_idx = 0;
         let mut best_score = f64::NEG_INFINITY;
 
         for &(_, child_idx) in &parent.children {
             let child = &self.nodes[child_idx];
-            let q = if child.visit_count == 0 {
+            let effective_visits = child.visit_count + child.virtual_losses;
+            let q = if effective_visits == 0 {
                 0.0
             } else {
-                child.total_value / child.visit_count as f64
+                // Virtual losses add negative value (pessimistic), discouraging
+                // re-selection of in-flight leaves.
+                (child.total_value - child.virtual_losses as f64)
+                    / effective_visits as f64
             };
             let exploration =
-                c_puct as f64 * child.prior as f64 * sqrt_parent / (1.0 + child.visit_count as f64);
+                c_puct as f64 * child.prior as f64 * sqrt_parent / (1.0 + effective_visits as f64);
             // Negate Q because child stores value from its own perspective
             let score = -q + exploration;
             if score > best_score {
@@ -77,6 +89,56 @@ impl MCTSTree {
             }
         }
         best_idx
+    }
+
+    /// Apply virtual loss along the path from node to root.
+    /// This makes the path look worse, discouraging parallel selection
+    /// of the same leaf.
+    pub fn apply_virtual_loss(&mut self, node_idx: usize) {
+        let mut idx = Some(node_idx);
+        while let Some(i) = idx {
+            self.nodes[i].virtual_losses += 1;
+            idx = self.nodes[i].parent;
+        }
+    }
+
+    /// Revert virtual loss along the path from node to root.
+    pub fn revert_virtual_loss(&mut self, node_idx: usize) {
+        let mut idx = Some(node_idx);
+        while let Some(i) = idx {
+            self.nodes[i].virtual_losses = self.nodes[i].virtual_losses.saturating_sub(1);
+            idx = self.nodes[i].parent;
+        }
+    }
+
+    /// Select up to `k` distinct leaves using virtual losses.
+    /// Returns a list of leaf node indices.
+    /// Terminal leaves are NOT included; they are backpropagated immediately.
+    pub fn select_multiple_leaves(
+        &mut self,
+        root: usize,
+        c_puct: f32,
+        k: usize,
+    ) -> (Vec<usize>, u32) {
+        let mut leaves = Vec::with_capacity(k);
+        let mut terminal_count = 0u32;
+
+        for _ in 0..k {
+            let leaf = self.select_leaf(root, c_puct);
+
+            let result = self.nodes[leaf].game.get_result();
+            if let Some(val) = result {
+                // Terminal node: backpropagate immediately, no virtual loss needed
+                self.backpropagate(leaf, val);
+                terminal_count += 1;
+            } else {
+                // Apply virtual loss to discourage re-selection
+                self.apply_virtual_loss(leaf);
+                leaves.push(leaf);
+            }
+        }
+
+        (leaves, terminal_count)
     }
 
     /// Expand a node: create child nodes for each valid move.
@@ -98,6 +160,7 @@ impl MCTSTree {
                     total_value: 0.0,
                     prior: policy[col],
                     is_expanded: false,
+                    virtual_losses: 0,
                 });
                 children.push((col as u8, child_idx));
             }
@@ -246,5 +309,69 @@ mod tests {
             .collect();
 
         assert_ne!(before, after);
+    }
+
+    #[test]
+    fn test_virtual_loss_apply_revert() {
+        let game = ConnectFour::new();
+        let mut tree = MCTSTree::new(game);
+        let policy = [1.0 / 7.0; COLS];
+        tree.expand(0, &policy);
+
+        let child_idx = tree.nodes[0].children[0].1;
+
+        // Apply virtual loss
+        tree.apply_virtual_loss(child_idx);
+        assert_eq!(tree.nodes[child_idx].virtual_losses, 1);
+        assert_eq!(tree.nodes[0].virtual_losses, 1); // parent too
+
+        // Apply again
+        tree.apply_virtual_loss(child_idx);
+        assert_eq!(tree.nodes[child_idx].virtual_losses, 2);
+        assert_eq!(tree.nodes[0].virtual_losses, 2);
+
+        // Revert once
+        tree.revert_virtual_loss(child_idx);
+        assert_eq!(tree.nodes[child_idx].virtual_losses, 1);
+        assert_eq!(tree.nodes[0].virtual_losses, 1);
+
+        // Revert again
+        tree.revert_virtual_loss(child_idx);
+        assert_eq!(tree.nodes[child_idx].virtual_losses, 0);
+        assert_eq!(tree.nodes[0].virtual_losses, 0);
+    }
+
+    #[test]
+    fn test_select_multiple_leaves_diversity() {
+        let game = ConnectFour::new();
+        let mut tree = MCTSTree::new(game);
+        let policy = [1.0 / 7.0; COLS];
+        tree.expand(0, &policy);
+
+        // Expand all children so we can go deeper
+        for i in 0..7 {
+            let child_idx = tree.nodes[0].children[i].1;
+            tree.expand(child_idx, &policy);
+        }
+
+        // Select 4 leaves — virtual losses should push to different branches
+        let (leaves, _terminal) = tree.select_multiple_leaves(0, 1.5, 4);
+        assert_eq!(leaves.len(), 4);
+
+        // At least some leaves should be different (virtual losses diversify)
+        // With equal priors and no visits, all children look the same initially,
+        // but virtual losses should push subsequent selections elsewhere.
+        let unique: std::collections::HashSet<usize> = leaves.iter().cloned().collect();
+        assert!(unique.len() >= 2, "Expected diverse leaf selection, got {:?}", leaves);
+
+        // Clean up virtual losses
+        for &leaf in &leaves {
+            tree.revert_virtual_loss(leaf);
+        }
+
+        // Virtual losses should be back to 0
+        for node in &tree.nodes {
+            assert_eq!(node.virtual_losses, 0);
+        }
     }
 }

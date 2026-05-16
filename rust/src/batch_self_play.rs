@@ -1,12 +1,21 @@
 /// Batched self-play engine for AlphaZero training.
 ///
 /// Manages N concurrent games, each with its own MCTS tree.
+/// Uses virtual losses for multi-leaf collection: multiple leaves are
+/// selected per game per batch, dramatically increasing GPU utilization
+/// and reducing Python↔Rust round-trip overhead.
+///
 /// The Python side calls collect_leaves() → GPU inference → apply_evaluations()
 /// in a loop, then advance_games() to sample actions and progress games.
 
 use crate::game::{ConnectFour, BOARD_SIZE, COLS, ROWS};
 use crate::mcts::MCTSTree;
 use rand::Rng;
+
+/// Number of leaves to collect per game per batch.
+/// Higher values increase GPU batch size and throughput.
+/// RTX 5060 Ti (16GB) handles large batches well; K=16 is optimal.
+pub const LEAVES_PER_GAME: usize = 16;
 
 /// A single training example: (encoded_state, action_probs, value).
 pub struct Example {
@@ -30,8 +39,9 @@ pub struct BatchedSelfPlay {
     histories: Vec<Vec<HistoryEntry>>,
     active: Vec<usize>,
 
-    // Pending leaves awaiting neural network evaluation
-    pending: Vec<(usize, usize)>, // (game_index, node_index)
+    // Pending leaves awaiting neural network evaluation.
+    // Each entry: (game_index, node_index)
+    pending: Vec<(usize, usize)>,
 
     // Config
     _num_simulations: usize,
@@ -134,25 +144,26 @@ impl BatchedSelfPlay {
         }
     }
 
-    /// Run one simulation step: select leaves from all active trees.
-    /// Returns encoded states for non-terminal leaves needing NN evaluation.
-    /// Terminal leaves are backpropagated immediately.
-    /// Returns (states, valid_moves, count).
+    /// Collect multiple leaves per game using virtual losses.
+    ///
+    /// For each active game, selects up to LEAVES_PER_GAME leaves
+    /// simultaneously. Virtual losses prevent re-selecting the same path,
+    /// diversifying the batch. Terminal leaves are backpropagated immediately.
+    ///
+    /// Returns (states, valid_moves, count) where count is the total number
+    /// of non-terminal leaves across all games needing NN evaluation.
     pub fn collect_leaves(&mut self) -> (Vec<f32>, Vec<bool>, usize) {
         self.pending.clear();
-        let mut states = Vec::new();
-        let mut valid = Vec::new();
+        let n = self.active.len();
+        let mut states = Vec::with_capacity(n * LEAVES_PER_GAME * 3 * BOARD_SIZE);
+        let mut valid = Vec::with_capacity(n * LEAVES_PER_GAME * COLS);
 
         for &i in &self.active {
             let root = self.trees[i].root();
-            let leaf = self.trees[i].select_leaf(root, self.c_puct);
+            let (leaves, _terminal_count) =
+                self.trees[i].select_multiple_leaves(root, self.c_puct, LEAVES_PER_GAME);
 
-            let result = self.trees[i].nodes[leaf].game.get_result();
-            if let Some(val) = result {
-                // Terminal node: backpropagate immediately
-                self.trees[i].backpropagate(leaf, val);
-            } else {
-                // Non-terminal: needs NN evaluation
+            for &leaf in &leaves {
                 states.extend_from_slice(&self.trees[i].nodes[leaf].game.encode());
                 let v = self.trees[i].nodes[leaf].game.get_valid_moves();
                 valid.extend_from_slice(&v);
@@ -165,9 +176,13 @@ impl BatchedSelfPlay {
     }
 
     /// Apply neural network evaluations to pending leaves.
+    /// Reverts virtual losses, then expands and backpropagates with real values.
     /// `policies` shape: (count, COLS), `values` shape: (count,).
     pub fn apply_evaluations(&mut self, policies: &[f32], values: &[f32]) {
         for (idx, &(game_i, node_idx)) in self.pending.iter().enumerate() {
+            // Revert virtual loss before applying real value
+            self.trees[game_i].revert_virtual_loss(node_idx);
+
             let policy = &policies[idx * COLS..(idx + 1) * COLS];
             self.trees[game_i].expand(node_idx, policy);
             self.trees[game_i]
@@ -336,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_and_apply() {
+    fn test_collect_and_apply_multi_leaf() {
         let mut engine = BatchedSelfPlay::new(3, 10, 1.5, 1.0, 0.25, 30, 0);
 
         // Init roots
@@ -344,9 +359,11 @@ mod tests {
         engine.init_roots(&policies);
         engine.add_noise();
 
-        // One simulation step
+        // One multi-leaf collection step
         let (states, valid, count) = engine.collect_leaves();
+        // With 3 games and LEAVES_PER_GAME leaves each, we expect up to 3*LEAVES_PER_GAME
         assert!(count > 0);
+        assert!(count <= 3 * LEAVES_PER_GAME);
         assert_eq!(states.len(), count * 3 * BOARD_SIZE);
         assert_eq!(valid.len(), count * COLS);
 
@@ -358,7 +375,8 @@ mod tests {
 
     #[test]
     fn test_full_game_loop() {
-        let mut engine = BatchedSelfPlay::new(2, 5, 1.5, 1.0, 0.25, 30, 0);
+        let num_sims = 32;
+        let mut engine = BatchedSelfPlay::new(2, num_sims, 1.5, 1.0, 0.25, 30, 0);
         let mut all_examples = Vec::new();
 
         // Init roots
@@ -370,8 +388,9 @@ mod tests {
         while !engine.is_done() && iterations < 1000 {
             engine.add_noise();
 
-            // Simulations
-            for _ in 0..5 {
+            // Simulations with multi-leaf batching
+            let batches = (num_sims + LEAVES_PER_GAME - 1) / LEAVES_PER_GAME;
+            for _ in 0..batches {
                 let (_states, _valid, count) = engine.collect_leaves();
                 if count > 0 {
                     let p = vec![1.0 / COLS as f32; count * COLS];
