@@ -200,11 +200,6 @@ def main() -> None:
             f"(buffer: {len(replay_buffer)})"
         )
 
-        # Save previous model for Arena
-        previous_model = AlphaZeroNet(args.res_blocks, args.filters).to(device)
-        previous_model.load_state_dict(model.state_dict())
-        previous_model.eval()
-
         # ── Training phase ──
         # Dynamic epoch scheduling: more epochs early (fresh model, sparse data),
         # fewer epochs later (risk of overfitting to stale buffer data).
@@ -266,26 +261,41 @@ def main() -> None:
                     f"r={result['correlation']:.3f}"
                 )
 
-        # ── Arena Evaluation ──
-        print("  ⚔️ Arena: New Model vs Previous Model (40 games) ...")
-        m1_w_p1, m1_w_p2, m2_w_p1, m2_w_p2, draws = play_batched_arena(
-            model1=model,
-            model2=previous_model,
-            device=device,
-            num_games=40,
-            num_simulations=args.eval_simulations,
-        )
-        m1_wins = m1_w_p1 + m1_w_p2
-        m2_wins = m2_w_p1 + m2_w_p2
-        win_rate = (m1_wins + 0.5 * draws) / 40 * 100
-        print(
-            f"     Result: New Model {m1_wins} - {m2_wins} Previous Model (Draws: {draws})"
-        )
-        print(f"     Breakdown (New Model): {m1_w_p1} wins as P1, {m1_w_p2} wins as P2")
-        print(
-            f"     Breakdown (Prev Model): {m2_w_p1} wins as P1, {m2_w_p2} wins as P2"
-        )
-        print(f"     New Model Winrate: {win_rate:.1f}%")
+        # ── Arena Evaluation (every 5 iterations) ──
+        arena_interval = 5
+        arena_lookback = 10  # Compare against model from N iterations ago
+        if (iteration + 1) % arena_interval == 0 and iteration >= arena_lookback:
+            opponent_iter = iteration + 1 - arena_lookback
+            opponent_path = checkpoint_dir / f"checkpoint_{opponent_iter:04d}.pt"
+            if opponent_path.exists():
+                opponent_model = AlphaZeroNet(args.res_blocks, args.filters).to(device)
+                try:
+                    load_checkpoint(opponent_path, opponent_model, device=device)
+                    opponent_model.eval()
+                    num_arena_games = 60
+                    print(f"  ⚔️ Arena: Current vs Iter-{opponent_iter} ({num_arena_games} games, {args.eval_simulations} sims) ...")
+                    m1_w_p1, m1_w_p2, m2_w_p1, m2_w_p2, draws = play_batched_arena(
+                        model1=model,
+                        model2=opponent_model,
+                        device=device,
+                        num_games=num_arena_games,
+                        num_simulations=args.eval_simulations,
+                    )
+                    m1_wins = m1_w_p1 + m1_w_p2
+                    m2_wins = m2_w_p1 + m2_w_p2
+                    win_rate = (m1_wins + 0.5 * draws) / num_arena_games * 100
+                    print(
+                        f"     Result: Current {m1_wins} - {m2_wins} Iter-{opponent_iter} (Draws: {draws})"
+                    )
+                    print(f"     Breakdown (Current): {m1_w_p1} wins as P1, {m1_w_p2} wins as P2")
+                    print(
+                        f"     Breakdown (Iter-{opponent_iter}): {m2_w_p1} wins as P1, {m2_w_p2} wins as P2"
+                    )
+                    print(f"     Current Winrate: {win_rate:.1f}%")
+                except Exception as e:
+                    print(f"  ⚔️ Arena: skipped (failed to load iter-{opponent_iter}: {e})")
+            else:
+                print(f"  ⚔️ Arena: skipped (no checkpoint for iter-{opponent_iter})")
 
         # ── Save checkpoint ──
         ckpt_path = checkpoint_dir / f"checkpoint_{iteration + 1:04d}.pt"
