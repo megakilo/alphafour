@@ -54,8 +54,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--eval-simulations",
         type=int,
-        default=100,
-        help="MCTS simulations per move for evaluation (default: 100)",
+        default=400,
+        help="MCTS simulations per move for evaluation (default: 400)",
     )
     parser.add_argument(
         "--epochs",
@@ -113,8 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--buffer-capacity",
         type=int,
-        default=100_000,
-        help="Replay buffer capacity (default: 100000)",
+        default=300_000,
+        help="Replay buffer capacity (default: 300000)",
     )
 
     return parser.parse_args()
