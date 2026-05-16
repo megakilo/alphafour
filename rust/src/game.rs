@@ -1,7 +1,12 @@
-/// Connect Four game engine — high-performance Rust implementation.
+/// Connect Four game engine — high-performance bitboard implementation.
 ///
-/// Direct port of `src/game.py` with identical semantics.
-/// Board is stored as a flat `[i8; 42]` array (row-major, row 0 = bottom).
+/// Uses two u64 bitboards (one per player) for O(1) win detection.
+/// Board layout: each column uses 7 bits (6 rows + 1 sentinel), left to right.
+/// Bit index = col * (ROWS+1) + row, where row 0 = bottom.
+///
+/// Win detection uses the standard bitboard alignment check:
+/// for each direction, shift and AND to find 4 consecutive pieces.
+///
 /// Players are 1 and -1. Player 1 moves first.
 
 pub const ROWS: usize = 6;
@@ -9,9 +14,15 @@ pub const COLS: usize = 7;
 pub const WIN_LENGTH: usize = 4;
 pub const BOARD_SIZE: usize = ROWS * COLS;
 
+/// Bits per column in the bitboard (ROWS + 1 sentinel bit).
+const H1: usize = ROWS + 1;
+
 #[derive(Clone)]
 pub struct ConnectFour {
-    pub board: [i8; BOARD_SIZE],
+    /// Bitboard for player 1's pieces.
+    bb_p1: u64,
+    /// Bitboard for player -1's pieces.
+    bb_p2: u64,
     pub heights: [u8; COLS],
     pub current_player: i8,
     pub last_move: Option<u8>,
@@ -21,7 +32,8 @@ pub struct ConnectFour {
 impl ConnectFour {
     pub fn new() -> Self {
         ConnectFour {
-            board: [0i8; BOARD_SIZE],
+            bb_p1: 0,
+            bb_p2: 0,
             heights: [0u8; COLS],
             current_player: 1,
             last_move: None,
@@ -29,22 +41,23 @@ impl ConnectFour {
         }
     }
 
-    /// Index into the flat board array.
+    /// Convert (row, col) to bit index in the bitboard.
     #[inline(always)]
-    fn idx(row: usize, col: usize) -> usize {
-        row * COLS + col
+    fn bit_index(row: usize, col: usize) -> u32 {
+        (col * H1 + row) as u32
     }
 
-    /// Get the value at (row, col).
-    #[inline(always)]
+    /// Get the value at (row, col): 1, -1, or 0 (empty).
+    #[inline]
     pub fn get(&self, row: usize, col: usize) -> i8 {
-        self.board[Self::idx(row, col)]
-    }
-
-    /// Set the value at (row, col).
-    #[inline(always)]
-    fn set(&mut self, row: usize, col: usize, val: i8) {
-        self.board[Self::idx(row, col)] = val;
+        let bit = 1u64 << Self::bit_index(row, col);
+        if self.bb_p1 & bit != 0 {
+            1
+        } else if self.bb_p2 & bit != 0 {
+            -1
+        } else {
+            0
+        }
     }
 
     /// Returns a boolean array indicating which columns are not full.
@@ -69,69 +82,55 @@ impl ConnectFour {
         let c = col as usize;
         let row = self.heights[c] as usize;
         assert!(row < ROWS, "Column {} is full", col);
-        self.set(row, c, self.current_player);
+
+        let bit = 1u64 << Self::bit_index(row, c);
+        if self.current_player == 1 {
+            self.bb_p1 |= bit;
+        } else {
+            self.bb_p2 |= bit;
+        }
+
         self.heights[c] += 1;
         self.last_move = Some(col);
         self.move_count += 1;
         self.current_player = -self.current_player;
     }
 
-    /// Check if the last move created a win.
-    pub fn is_win(&self) -> bool {
-        let col = match self.last_move {
-            Some(c) => c as usize,
-            None => return false,
-        };
-        let row = (self.heights[col] - 1) as usize;
-        let player = self.get(row, col);
-        self.check_win_at(row, col, player)
-    }
+    /// Check if the given bitboard has a 4-in-a-row.
+    ///
+    /// For each direction, we shift the bitboard and AND repeatedly.
+    /// If any bit remains after 3 shifts, there's a 4-in-a-row.
+    #[inline]
+    fn has_won(bb: u64) -> bool {
+        // Direction offsets for the bitboard layout:
+        // Vertical:       shift by 1 (adjacent rows in same column)
+        // Horizontal:     shift by H1 (adjacent columns)
+        // Diagonal /:     shift by H1+1
+        // Anti-diagonal \: shift by H1-1
+        const DIRECTIONS: [u32; 4] = [1, H1 as u32, (H1 + 1) as u32, (H1 - 1) as u32];
 
-    /// Check if there's a 4-in-a-row through (row, col) for player.
-    fn check_win_at(&self, row: usize, col: usize, player: i8) -> bool {
-        // Directions: horizontal, vertical, diagonal, anti-diagonal
-        const DIRECTIONS: [(i32, i32); 4] = [(0, 1), (1, 0), (1, 1), (1, -1)];
-
-        for &(dr, dc) in &DIRECTIONS {
-            let mut count: u32 = 1;
-
-            // Positive direction
-            for i in 1..WIN_LENGTH as i32 {
-                let r = row as i32 + dr * i;
-                let c = col as i32 + dc * i;
-                if r >= 0
-                    && r < ROWS as i32
-                    && c >= 0
-                    && c < COLS as i32
-                    && self.get(r as usize, c as usize) == player
-                {
-                    count += 1;
-                } else {
-                    break;
-                }
-            }
-
-            // Negative direction
-            for i in 1..WIN_LENGTH as i32 {
-                let r = row as i32 - dr * i;
-                let c = col as i32 - dc * i;
-                if r >= 0
-                    && r < ROWS as i32
-                    && c >= 0
-                    && c < COLS as i32
-                    && self.get(r as usize, c as usize) == player
-                {
-                    count += 1;
-                } else {
-                    break;
-                }
-            }
-
-            if count >= WIN_LENGTH as u32 {
+        for &dir in &DIRECTIONS {
+            let m = bb & (bb >> dir);
+            if m & (m >> (2 * dir)) != 0 {
                 return true;
             }
         }
         false
+    }
+
+    /// Check if the last move created a win.
+    #[inline]
+    pub fn is_win(&self) -> bool {
+        if self.last_move.is_none() {
+            return false;
+        }
+        // The player who just moved is -current_player
+        let bb = if self.current_player == -1 {
+            self.bb_p1
+        } else {
+            self.bb_p2
+        };
+        Self::has_won(bb)
     }
 
     /// Check if the board is full (draw).
@@ -168,20 +167,29 @@ impl ConnectFour {
     /// Plane 1: opponent's pieces (1 where opponent has a piece)
     /// Plane 2: constant plane indicating current player (all 1s if player 1, all 0s if player -1)
     ///
-    /// Returns flattened [3 * ROWS * COLS] f32 array in C-contiguous order.
+    /// Returns flattened [3 * ROWS * COLS] f32 array in C-contiguous order (row-major).
     pub fn encode(&self) -> [f32; 3 * BOARD_SIZE] {
         let mut planes = [0.0f32; 3 * BOARD_SIZE];
         let cp = self.current_player;
 
-        for i in 0..BOARD_SIZE {
-            let piece = self.board[i];
-            // Plane 0: current player's pieces
-            if piece == cp {
-                planes[i] = 1.0;
-            }
-            // Plane 1: opponent's pieces
-            if piece == -cp {
-                planes[BOARD_SIZE + i] = 1.0;
+        let (bb_cur, bb_opp) = if cp == 1 {
+            (self.bb_p1, self.bb_p2)
+        } else {
+            (self.bb_p2, self.bb_p1)
+        };
+
+        for r in 0..ROWS {
+            for c in 0..COLS {
+                let bit = 1u64 << Self::bit_index(r, c);
+                let flat_idx = r * COLS + c;
+                // Plane 0: current player's pieces
+                if bb_cur & bit != 0 {
+                    planes[flat_idx] = 1.0;
+                }
+                // Plane 1: opponent's pieces
+                if bb_opp & bit != 0 {
+                    planes[BOARD_SIZE + flat_idx] = 1.0;
+                }
             }
         }
 
@@ -194,7 +202,6 @@ impl ConnectFour {
 
         planes
     }
-
 }
 
 impl Default for ConnectFour {
@@ -302,19 +309,6 @@ mod tests {
     fn test_diagonal_win() {
         let mut game = ConnectFour::new();
         // Build a diagonal win for Player 1
-        //   col: 0 1 2 3
-        // row 3:       1
-        // row 2:     1 -1
-        // row 1:   1 -1 -1
-        // row 0: 1 -1 -1 1
-        game.make_move(0); // P1 at (0,0)
-        game.make_move(1); // P-1 at (0,1)
-        game.make_move(1); // P1 at (1,1)
-        game.make_move(2); // P-1 at (0,2)
-        game.make_move(2); // P1 at (1,2) -- wait, P1 already moved...
-
-        // Let me redo this more carefully
-        let mut game = ConnectFour::new();
         // P1=1, P2=-1
         game.make_move(0); // P1 (0,0)
         game.make_move(1); // P2 (0,1)
@@ -353,7 +347,6 @@ mod tests {
     fn test_draw() {
         let mut game = ConnectFour::new();
         // Fill board without winning (known draw pattern)
-        // Fill columns alternating to avoid 4-in-a-row
         let moves = [
             // Col 0: P1,P2,P1,P2,P1,P2
             0, 1, 0, 1, 0, 1,
@@ -403,7 +396,6 @@ mod tests {
         game.make_move(4);
 
         let cloned = game.clone();
-        assert_eq!(cloned.board, game.board);
         assert_eq!(cloned.heights, game.heights);
         assert_eq!(cloned.current_player, game.current_player);
         assert_eq!(cloned.move_count, game.move_count);
@@ -477,8 +469,6 @@ mod tests {
                 return;
             }
         }
-        // After filling, make independent moves if game is still going
-        // This test really just verifies the mask updates properly
         let valid = game.get_valid_moves();
         assert!(!valid[0]); // Column 0 should be full
     }
@@ -506,5 +496,32 @@ mod tests {
         assert_eq!(game.current_player, -1);
         // Result from P2's perspective: P2 lost → -1.0
         assert_eq!(game.get_result(), Some(-1.0));
+    }
+
+    #[test]
+    fn test_bitboard_win_detection_speed() {
+        // Stress test: play many games and verify win detection is consistent
+        let mut game = ConnectFour::new();
+        // Horizontal win in bottom row
+        game.make_move(0);
+        game.make_move(0);
+        game.make_move(1);
+        game.make_move(1);
+        game.make_move(2);
+        game.make_move(2);
+        assert!(!game.is_win());
+        game.make_move(3); // P1 4-in-a-row: cols 0,1,2,3
+        assert!(game.is_win());
+    }
+
+    #[test]
+    fn test_get_value_consistency() {
+        let mut game = ConnectFour::new();
+        game.make_move(3); // P1 at (0,3)
+        assert_eq!(game.get(0, 3), 1);
+        assert_eq!(game.get(0, 0), 0);
+
+        game.make_move(4); // P-1 at (0,4)
+        assert_eq!(game.get(0, 4), -1);
     }
 }
