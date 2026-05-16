@@ -85,13 +85,13 @@ class AlphaZeroNet(nn.Module):
             *[ResBlock(num_filters) for _ in range(num_res_blocks)]
         )
 
-        # Policy head
+        # Policy head (32 filters for sufficient tactical pattern capacity)
         self.policy_head = nn.Sequential(
-            nn.Conv2d(num_filters, 2, 1, bias=False),
-            nn.BatchNorm2d(2),
+            nn.Conv2d(num_filters, 32, 1, bias=False),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(2 * ROWS * COLS, COLS),
+            nn.Linear(32 * ROWS * COLS, COLS),
         )
 
         # Value head
