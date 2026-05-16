@@ -127,6 +127,8 @@ class AlphaZeroNet(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict policy and value for a single state or batch.
 
+        Note: caller is responsible for calling model.eval() before inference.
+
         Args:
             state: Board encoding, shape (3, 6, 7) or (batch, 3, 6, 7).
             valid_moves: Boolean mask of valid moves, shape (7,) or (batch, 7).
@@ -141,7 +143,6 @@ class AlphaZeroNet(nn.Module):
             if valid_moves is not None:
                 valid_moves = valid_moves.unsqueeze(0)
 
-        self.eval()
         with torch.no_grad():
             policy_logits, value = self(state)
 
