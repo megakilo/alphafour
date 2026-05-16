@@ -42,14 +42,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--games-per-iteration",
         type=int,
-        default=500,
-        help="Self-play games per iteration (default: 500)",
+        default=1000,
+        help="Self-play games per iteration (default: 1000)",
     )
     parser.add_argument(
         "--training-simulations",
         type=int,
-        default=2400,
-        help="MCTS simulations per move for training (default: 2400)",
+        default=800,
+        help="MCTS simulations per move for training (default: 800)",
     )
     parser.add_argument(
         "--eval-simulations",
