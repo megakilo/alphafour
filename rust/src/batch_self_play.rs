@@ -304,8 +304,18 @@ impl BatchedSelfPlay {
                 self.histories[i].clear();
             } else {
                 new_active.push(i);
-                // Create fresh tree for next move (no tree reuse for simplicity)
-                self.trees[i] = MCTSTree::new(self.games[i].clone());
+                // Tree reuse: rebase to the chosen child's subtree.
+                // This preserves visit counts and value estimates from prior search.
+                let child_idx = self.trees[i].find_child_action(0, action);
+                if let Some(child) = child_idx {
+                    if !self.trees[i].rebase(child) {
+                        // Rebase failed, fall back to fresh tree
+                        self.trees[i] = MCTSTree::new(self.games[i].clone());
+                    }
+                } else {
+                    // Action not found in tree (shouldn't happen), create fresh tree
+                    self.trees[i] = MCTSTree::new(self.games[i].clone());
+                }
             }
         }
 
@@ -313,9 +323,17 @@ impl BatchedSelfPlay {
         finished_examples
     }
 
-    /// Initialize new roots with policies (same as init_roots).
+    /// Initialize new roots with policies, skipping already-expanded roots.
+    /// With tree reuse, some roots are already expanded from the reused subtree.
+    /// `policies` is a flat array of shape (num_active, COLS).
     pub fn init_new_roots(&mut self, policies: &[f32]) {
-        self.init_roots(policies)
+        for (idx, &i) in self.active.iter().enumerate() {
+            let root = self.trees[i].root();
+            if !self.trees[i].nodes[root].is_expanded {
+                let policy = &policies[idx * COLS..(idx + 1) * COLS];
+                self.trees[i].expand(root, policy);
+            }
+        }
     }
 }
 

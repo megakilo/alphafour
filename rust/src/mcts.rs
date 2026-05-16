@@ -205,6 +205,81 @@ impl MCTSTree {
         }
         counts
     }
+
+    /// Find the child node index for a given action.
+    /// Returns None if the action is not a valid child.
+    pub fn find_child_action(&self, node_idx: usize, action: u8) -> Option<usize> {
+        self.nodes[node_idx]
+            .children
+            .iter()
+            .find(|&&(a, _)| a == action)
+            .map(|&(_, idx)| idx)
+    }
+
+    /// Rebase the tree to a child node, making it the new root.
+    ///
+    /// Collects all nodes reachable from the new root via BFS, compacts them
+    /// into a fresh arena, and remaps all parent/child indices. Unreachable
+    /// nodes (siblings and their subtrees) are dropped, freeing memory.
+    ///
+    /// Returns true if rebase succeeded, false if child_idx was invalid.
+    pub fn rebase(&mut self, child_idx: usize) -> bool {
+        if child_idx >= self.nodes.len() {
+            return false;
+        }
+
+        // BFS to collect all reachable nodes from child_idx
+        let mut old_to_new = vec![usize::MAX; self.nodes.len()];
+        let mut queue = std::collections::VecDeque::new();
+        let mut new_nodes = Vec::new();
+
+        old_to_new[child_idx] = 0;
+        queue.push_back(child_idx);
+
+        while let Some(old_idx) = queue.pop_front() {
+            let new_idx = old_to_new[old_idx];
+            let node = &self.nodes[old_idx];
+
+            // Map children
+            let mut new_children = Vec::with_capacity(node.children.len());
+            for &(action, old_child_idx) in &node.children {
+                let new_child_idx = new_nodes.len() + queue.len() + 1;
+                old_to_new[old_child_idx] = new_child_idx;
+                queue.push_back(old_child_idx);
+                new_children.push((action, new_child_idx));
+            }
+
+            // Create new node with remapped indices
+            new_nodes.push(MCTSNode {
+                game: node.game.clone(),
+                children: new_children,
+                parent: if new_idx == 0 {
+                    None // New root has no parent
+                } else {
+                    // We need to find the parent, but we handle this below
+                    node.parent.and_then(|p| {
+                        let mapped = old_to_new[p];
+                        if mapped == usize::MAX { None } else { Some(mapped) }
+                    })
+                },
+                visit_count: node.visit_count,
+                total_value: node.total_value,
+                prior: node.prior,
+                is_expanded: node.is_expanded,
+                virtual_losses: 0, // Reset virtual losses on rebase
+            });
+
+            debug_assert_eq!(new_nodes.len() - 1, new_idx);
+        }
+
+        // Set root's parent to None
+        if !new_nodes.is_empty() {
+            new_nodes[0].parent = None;
+        }
+
+        self.nodes = new_nodes;
+        true
+    }
 }
 
 #[cfg(test)]
@@ -373,5 +448,60 @@ mod tests {
         for node in &tree.nodes {
             assert_eq!(node.virtual_losses, 0);
         }
+    }
+
+    #[test]
+    fn test_find_child_action() {
+        let game = ConnectFour::new();
+        let mut tree = MCTSTree::new(game);
+        let policy = [1.0 / 7.0; COLS];
+        tree.expand(0, &policy);
+
+        // Should find each child action
+        for &(action, child_idx) in &tree.nodes[0].children.clone() {
+            assert_eq!(tree.find_child_action(0, action), Some(child_idx));
+        }
+
+        // Invalid action
+        assert_eq!(tree.find_child_action(0, 100), None);
+    }
+
+    #[test]
+    fn test_rebase() {
+        let game = ConnectFour::new();
+        let mut tree = MCTSTree::new(game);
+        let policy = [1.0 / 7.0; COLS];
+        tree.expand(0, &policy);
+
+        // Expand first child and add some visits
+        let child_idx = tree.nodes[0].children[0].1;
+        tree.expand(child_idx, &policy);
+        tree.backpropagate(child_idx, 0.5);
+
+        // Get info before rebase
+        let child_visits = tree.nodes[child_idx].visit_count;
+        let child_value = tree.nodes[child_idx].total_value;
+        let num_grandchildren = tree.nodes[child_idx].children.len();
+
+        // Rebase to first child
+        assert!(tree.rebase(child_idx));
+
+        // Root should now be the former child
+        assert_eq!(tree.nodes[0].parent, None);
+        assert_eq!(tree.nodes[0].visit_count, child_visits);
+        assert!((tree.nodes[0].total_value - child_value).abs() < 1e-6);
+        assert!(tree.nodes[0].is_expanded);
+        assert_eq!(tree.nodes[0].children.len(), num_grandchildren);
+
+        // All children should reference valid indices
+        for &(_, grandchild_idx) in &tree.nodes[0].children {
+            assert!(grandchild_idx < tree.nodes.len());
+            assert_eq!(tree.nodes[grandchild_idx].parent, Some(0));
+        }
+
+        // Old root and siblings should be pruned (fewer nodes)
+        // Original: 1 root + 7 children + 7 grandchildren of child[0] = 15
+        // After rebase: 1 new root + 7 grandchildren = 8
+        assert_eq!(tree.nodes.len(), 1 + num_grandchildren);
     }
 }
