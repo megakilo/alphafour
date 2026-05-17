@@ -34,7 +34,7 @@ class ReplayBuffer:
     def sample(self, batch_size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Sample a batch with recency-weighted probabilities.
 
-        Uses linearly increasing weights: the newest example has 3× the
+        Uses linearly increasing weights: the newest example has 2× the
         sampling probability of the oldest. This keeps the training signal
         fresh while still using older data for stability.
 
@@ -46,8 +46,8 @@ class ReplayBuffer:
         n = len(self.buffer)
         actual_size = min(batch_size, n)
 
-        # Linear weights: oldest=1.0, newest=3.0
-        weights = np.linspace(1.0, 3.0, n)
+        # Linear weights: oldest=1.0, newest=2.0
+        weights = np.linspace(1.0, 2.0, n)
         weights /= weights.sum()
 
         indices = np.random.choice(n, size=actual_size, replace=False, p=weights)
