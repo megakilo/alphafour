@@ -273,13 +273,14 @@ def main() -> None:
                     load_checkpoint(opponent_path, opponent_model, device=device)
                     opponent_model.eval()
                     num_arena_games = 60
-                    print(f"  ⚔️ Arena: Current vs Iter-{opponent_iter} ({num_arena_games} games, {args.eval_simulations} sims) ...")
+                    arena_sims = 800
+                    print(f"  ⚔️ Arena: Current vs Iter-{opponent_iter} ({num_arena_games} games, {arena_sims} sims, temp=0.5/6 moves) ...")
                     m1_w_p1, m1_w_p2, m2_w_p1, m2_w_p2, draws = play_batched_arena(
                         model1=model,
                         model2=opponent_model,
                         device=device,
                         num_games=num_arena_games,
-                        num_simulations=args.eval_simulations,
+                        num_simulations=arena_sims,
                     )
                     m1_wins = m1_w_p1 + m1_w_p2
                     m2_wins = m2_w_p1 + m2_w_p2

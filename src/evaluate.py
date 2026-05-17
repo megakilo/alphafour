@@ -209,12 +209,17 @@ def play_batched_arena(
     model2: AlphaZeroNet,
     device: torch.device,
     num_games: int = 40,
-    num_simulations: int = 200,
+    num_simulations: int = 800,
+    temperature_moves: int = 6,
+    temperature: float = 0.5,
 ) -> tuple[int, int, int, int, int]:
     """Play games between two models using Batched MCTS.
 
     Model 1 plays as Player 1 for the first half of games,
     and as Player 2 for the second half.
+
+    Uses temperature-based move selection for the first `temperature_moves`
+    moves to introduce opening diversity and avoid deterministic play.
 
     Returns:
         (m1_wins_p1, m1_wins_p2, m2_wins_p1, m2_wins_p2, draws)
@@ -224,6 +229,7 @@ def play_batched_arena(
 
     m1_is_p1 = [True] * (num_games // 2) + [False] * (num_games - num_games // 2)
     games = [ConnectFour() for _ in range(num_games)]
+    move_counts = [0] * num_games  # Track move count per game
 
     roots = [MCTSNode(g) for g in games]
     active_indices = list(range(num_games))
@@ -312,9 +318,16 @@ def play_batched_arena(
             for action, child in root.children.items():
                 visit_counts[action] = child.visit_count
 
-            # Greedy play for arena
-            action = int(np.argmax(visit_counts))
+            # Temperature-based selection for early moves, greedy after
+            if move_counts[i] < temperature_moves and temperature > 0:
+                # Apply temperature to visit counts
+                visit_pow = visit_counts ** (1.0 / temperature)
+                visit_pow /= visit_pow.sum()
+                action = int(np.random.choice(COLS, p=visit_pow))
+            else:
+                action = int(np.argmax(visit_counts))
             game.make_move(action)
+            move_counts[i] += 1
 
             if game.is_terminal():
                 res = game.get_result()
