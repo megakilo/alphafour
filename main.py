@@ -48,8 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--training-simulations",
         type=int,
-        default=800,
-        help="MCTS simulations per move for training (default: 800)",
+        default=1200,
+        help="MCTS simulations per move for training (default: 1200)",
     )
     parser.add_argument(
         "--eval-simulations",
