@@ -36,8 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--iterations",
         type=int,
-        default=100,
-        help="Number of training iterations (default: 100)",
+        default=150,
+        help="Number of training iterations (default: 150)",
     )
     parser.add_argument(
         "--games-per-iteration",
