@@ -204,9 +204,10 @@ def main() -> None:
         # Dynamic epoch scheduling: more epochs early (fresh model, sparse data),
         # fewer epochs later (risk of overfitting to stale buffer data).
         num_epochs = 4 if iteration < 20 else args.epochs
-        # When batches_per_epoch is None, trainer auto-scales to buffer size
-        effective_batches = args.batches_per_epoch or max(
-            1, len(replay_buffer) // args.batch_size
+        # When batches_per_epoch is None, auto-scale but cap at 500 to
+        # prevent training time from dominating (300K buffer → 1171 uncapped)
+        effective_batches = args.batches_per_epoch or min(
+            500, max(1, len(replay_buffer) // args.batch_size)
         )
         print(f"  🧠 Training: {num_epochs} epochs × {effective_batches} batches ...")
         model.to(device)
@@ -216,7 +217,7 @@ def main() -> None:
 
         for epoch in tqdm(range(num_epochs), desc="  Training", unit="epoch"):
             losses = trainer.train_epoch(
-                replay_buffer, num_batches=args.batches_per_epoch
+                replay_buffer, num_batches=effective_batches
             )
             for k in total_losses:
                 total_losses[k] += losses[k]
