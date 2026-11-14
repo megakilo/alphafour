@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "alphafour-engine"
+version = "0.1.0"
+description = "Rust Connect Four game engine, batched MCTS, and exact bitboard W/D/L solver"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+]
+
+[tool.maturin]
+features = ["extension-module"]
+module-name = "alphafour_engine"
+profile = "release"
+
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "src/**/*.rs" },
+]

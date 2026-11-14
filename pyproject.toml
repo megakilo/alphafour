@@ -5,15 +5,20 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alphafour-engine",
     "numpy",
     "torch",
     "tqdm",
 ]
+
+[tool.uv.sources]
+alphafour-engine = { path = "rust", editable = true }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
 [dependency-groups]
 dev = [
+    "maturin>=1.7,<2.0",
     "pytest>=9.0.3",
 ]
