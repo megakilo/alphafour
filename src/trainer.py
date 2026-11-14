@@ -1,78 +1,247 @@
-"""Training loop with replay buffer for AlphaZero."""
+"""Single-GPU training loop and contiguous ring-buffer replay memory for AlphaZero."""
 
 from __future__ import annotations
 
-import random
-from collections import deque
+from contextlib import nullcontext
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
+from .game import COLS, ROWS
 from .model import AlphaZeroNet
-from .game import ROWS
 
 
 class ReplayBuffer:
-    """Fixed-size replay buffer with recency-weighted sampling.
+    """Contiguous ring-buffer replay memory with O(B) inverse-CDF recency sampling.
 
-    More recently added examples are sampled with higher probability,
-    preventing the model from overfitting to stale data as the self-play
-    distribution evolves during training.
+    Stores board planes compactly as uint8 (0/1) — ~47 MB total for 300,000 examples —
+    either on CPU or directly in GPU VRAM, avoiding Python tuple/deque overhead and
+    per-batch numpy/PCIe conversion bottlenecks.
     """
 
-    def __init__(self, capacity: int = 200_000) -> None:
-        self.buffer: deque[tuple[np.ndarray, np.ndarray, float]] = deque(
-            maxlen=capacity
+    def __init__(
+        self,
+        capacity: int = 300_000,
+        device: torch.device | str | None = None,
+    ) -> None:
+        if capacity <= 0:
+            raise ValueError("ReplayBuffer capacity must be positive.")
+        self.capacity = int(capacity)
+        self.buf_device = (
+            torch.device(device) if device is not None else torch.device("cpu")
         )
 
-    def add(self, examples: list[tuple[np.ndarray, np.ndarray, float]]) -> None:
-        """Add a batch of examples."""
-        self.buffer.extend(examples)
+        self.states_buf = torch.zeros(
+            (self.capacity, 3, ROWS, COLS),
+            dtype=torch.uint8,
+            device=self.buf_device,
+        )
+        self.policies_buf = torch.zeros(
+            (self.capacity, COLS),
+            dtype=torch.float32,
+            device=self.buf_device,
+        )
+        self.values_buf = torch.zeros(
+            (self.capacity,),
+            dtype=torch.float32,
+            device=self.buf_device,
+        )
 
-    def sample(self, batch_size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Sample a batch with recency-weighted probabilities.
+        self._write_pos: int = 0
+        self._size: int = 0
 
-        Uses linearly increasing weights: the newest example has 2× the
-        sampling probability of the oldest. This keeps the training signal
-        fresh while still using older data for stability.
+    def to(self, device: torch.device | str) -> ReplayBuffer:
+        """Move ring-buffer backing tensors to the target device."""
+        target = torch.device(device)
+        if target != self.buf_device:
+            self.states_buf = self.states_buf.to(target)
+            self.policies_buf = self.policies_buf.to(target)
+            self.values_buf = self.values_buf.to(target)
+            self.buf_device = target
+        return self
 
-        Returns:
-            states: (batch, 3, 6, 7) float32
-            policies: (batch, 7) float32
-            values: (batch,) float32
+    def add_batch(
+        self,
+        states: np.ndarray | torch.Tensor,
+        policies: np.ndarray | torch.Tensor,
+        values: np.ndarray | torch.Tensor,
+    ) -> None:
+        """Vectorized ring-buffer write without Python loops."""
+        m = int(states.shape[0])
+        if m == 0:
+            return
+
+        if m > self.capacity:
+            states = states[-self.capacity :]
+            policies = policies[-self.capacity :]
+            values = values[-self.capacity :]
+            m = self.capacity
+
+        if isinstance(states, torch.Tensor):
+            if states.dtype == torch.uint8:
+                s_t = states.to(device=self.buf_device, dtype=torch.uint8)
+            else:
+                s_t = (states > 0.5).to(device=self.buf_device, dtype=torch.uint8)
+        else:
+            states_arr = np.asarray(states)
+            if states_arr.dtype == np.uint8:
+                u8_arr = np.ascontiguousarray(states_arr)
+            else:
+                u8_arr = np.ascontiguousarray(states_arr > 0.5).view(np.uint8)
+            s_t = torch.as_tensor(u8_arr, device=self.buf_device)
+
+        if isinstance(policies, torch.Tensor):
+            p_t = policies.to(device=self.buf_device, dtype=torch.float32)
+        else:
+            p_t = torch.as_tensor(
+                np.ascontiguousarray(policies, dtype=np.float32),
+                device=self.buf_device,
+            )
+
+        if isinstance(values, torch.Tensor):
+            v_t = values.reshape(-1).to(device=self.buf_device, dtype=torch.float32)
+        else:
+            v_t = torch.as_tensor(
+                np.ascontiguousarray(values, dtype=np.float32).reshape(-1),
+                device=self.buf_device,
+            )
+
+        end = self._write_pos + m
+        if end <= self.capacity:
+            self.states_buf[self._write_pos : end] = s_t
+            self.policies_buf[self._write_pos : end] = p_t
+            self.values_buf[self._write_pos : end] = v_t
+        else:
+            first = self.capacity - self._write_pos
+            rem = m - first
+            self.states_buf[self._write_pos :] = s_t[:first]
+            self.states_buf[:rem] = s_t[first:]
+            self.policies_buf[self._write_pos :] = p_t[:first]
+            self.policies_buf[:rem] = p_t[first:]
+            self.values_buf[self._write_pos :] = v_t[:first]
+            self.values_buf[:rem] = v_t[first:]
+
+        self._write_pos = end % self.capacity
+        self._size = min(self.capacity, self._size + m)
+
+    def add(
+        self,
+        examples: (
+            tuple[
+                np.ndarray | torch.Tensor,
+                np.ndarray | torch.Tensor,
+                np.ndarray | torch.Tensor,
+            ]
+            | list[tuple[np.ndarray, np.ndarray, float]]
+        ),
+    ) -> None:
+        """Add examples from either an array tuple (states, policies, values) or legacy tuple list."""
+        if isinstance(examples, tuple) and len(examples) == 3:
+            states, policies, values = examples
+            self.add_batch(states, policies, values)
+            return
+
+        examples_list = examples if isinstance(examples, list) else list(examples)
+        if not examples_list:
+            return
+
+        states_arr = np.stack([ex[0] for ex in examples_list], axis=0)
+        policies_arr = np.stack([ex[1] for ex in examples_list], axis=0)
+        values_arr = np.asarray([ex[2] for ex in examples_list], dtype=np.float32)
+        self.add_batch(states_arr, policies_arr, values_arr)
+
+    def sample_tensors(
+        self,
+        batch_size: int,
+        device: torch.device | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Sample a recency-weighted batch directly as tensors on `device`.
+
+        Analytical inverse-CDF for linear weights w(x) = 1 + x on [0, 1]
+        (oldest weight = 1.0, newest weight = 2.0):
+            F(x) = (2x + x^2) / 3 = u  =>  x = sqrt(1 + 3u) - 1.
         """
-        n = len(self.buffer)
+        n = self._size
+        if n == 0:
+            raise ValueError("Cannot sample from an empty ReplayBuffer.")
+
         actual_size = min(batch_size, n)
+        out_device = torch.device(device) if device is not None else self.buf_device
 
-        # Linear weights: oldest=1.0, newest=2.0
-        weights = np.linspace(1.0, 2.0, n)
-        weights /= weights.sum()
+        u = torch.rand(actual_size, device=self.buf_device, dtype=torch.float32)
+        rank = ((torch.sqrt(1.0 + 3.0 * u) - 1.0) * n).long().clamp_(0, n - 1)
+        oldest_idx = (self._write_pos - n) % self.capacity
+        idx = (oldest_idx + rank) % self.capacity
 
-        indices = np.random.choice(n, size=actual_size, replace=False, p=weights)
-
-        buf_list = list(self.buffer)  # Required for indexed access
-        states = np.array([buf_list[i][0] for i in indices], dtype=np.float32)
-        policies = np.array([buf_list[i][1] for i in indices], dtype=np.float32)
-        values = np.array([buf_list[i][2] for i in indices], dtype=np.float32)
+        states = self.states_buf[idx].to(device=out_device, dtype=torch.float32)
+        policies = self.policies_buf[idx].to(device=out_device)
+        values = self.values_buf[idx].to(device=out_device)
         return states, policies, values
 
+    def sample(self, batch_size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Sample a recency-weighted batch as CPU float32 numpy arrays."""
+        states, policies, values = self.sample_tensors(
+            batch_size, device=torch.device("cpu")
+        )
+        return states.numpy(), policies.numpy(), values.numpy()
+
     def __len__(self) -> int:
-        return len(self.buffer)
+        return self._size
 
-    def get_state(self) -> list:
-        """Serialize buffer state for checkpointing."""
-        return list(self.buffer)
+    def get_state(self) -> dict[str, torch.Tensor]:
+        """Serialize compact buffer state on CPU in chronological (oldest -> newest) order."""
+        n = self._size
+        if n == 0:
+            return {
+                "states": torch.empty((0, 3, ROWS, COLS), dtype=torch.uint8),
+                "policies": torch.empty((0, COLS), dtype=torch.float32),
+                "values": torch.empty((0,), dtype=torch.float32),
+            }
 
-    def load_state(self, state: list) -> None:
-        """Restore buffer from checkpoint."""
-        self.buffer.clear()
-        self.buffer.extend(state)
+        oldest_idx = (self._write_pos - n) % self.capacity
+        if oldest_idx + n <= self.capacity:
+            end = oldest_idx + n
+            states = self.states_buf[oldest_idx:end].detach().to("cpu").contiguous().clone()
+            policies = self.policies_buf[oldest_idx:end].detach().to("cpu").contiguous().clone()
+            values = self.values_buf[oldest_idx:end].detach().to("cpu").contiguous().clone()
+        else:
+            states = torch.cat(
+                (self.states_buf[oldest_idx:], self.states_buf[: self._write_pos]),
+                dim=0,
+            ).to("cpu")
+            policies = torch.cat(
+                (self.policies_buf[oldest_idx:], self.policies_buf[: self._write_pos]),
+                dim=0,
+            ).to("cpu")
+            values = torch.cat(
+                (self.values_buf[oldest_idx:], self.values_buf[: self._write_pos]),
+                dim=0,
+            ).to("cpu")
+
+        return {
+            "states": states,
+            "policies": policies,
+            "values": values,
+        }
+
+    def load_state(self, state: dict[str, Any] | list[Any]) -> None:
+        """Restore buffer from either compact tensor dict or legacy list of tuples."""
+        self._write_pos = 0
+        self._size = 0
+        if not state:
+            return
+
+        if isinstance(state, dict):
+            self.add_batch(state["states"], state["policies"], state["values"])
+        else:
+            self.add(state)
 
 
 class Trainer:
-    """AlphaZero trainer with warm-restart LR schedule."""
+    """Single-GPU AlphaZero trainer with BF16 AMP, WDL loss, and warmup+cosine LR."""
 
     def __init__(
         self,
@@ -81,97 +250,216 @@ class Trainer:
         lr: float = 0.001,
         weight_decay: float = 1e-4,
         batch_size: int = 256,
-        total_iterations: int = 100,
+        total_iterations: int = 150,
+        use_compile: bool = False,
     ) -> None:
-        self.model = model
-        self.device = device
+        self.device = torch.device(device)
+        self.model = model.to(self.device)
         self.batch_size = batch_size
+        self.total_iterations = max(1, int(total_iterations))
+
+        # Exclude 1D parameters (BatchNorm weights/biases and Linear biases) from weight decay
+        decay_params = [
+            p for p in self.model.parameters() if p.requires_grad and p.ndim >= 2
+        ]
+        no_decay_params = [
+            p for p in self.model.parameters() if p.requires_grad and p.ndim < 2
+        ]
+        param_groups = [
+            g
+            for g in (
+                {"params": decay_params, "weight_decay": weight_decay},
+                {"params": no_decay_params, "weight_decay": 0.0},
+            )
+            if g["params"]
+        ]
+
+        use_fused = self.device.type == "cuda"
         self.optimizer = torch.optim.AdamW(
-            model.parameters(), lr=lr, weight_decay=weight_decay
+            param_groups,
+            lr=lr,
+            fused=use_fused,
         )
-        # Warm restarts: cycle length T_0=20 iters, doubling each restart.
-        # This periodically bumps LR back up, helping the model adapt to
-        # the evolving self-play distribution rather than overfitting
-        # to stale buffer data.
-        self.scheduler = CosineAnnealingWarmRestarts(
-            self.optimizer, T_0=20, T_mult=2, eta_min=1e-5
+
+        # Optional torch.compile on CUDA with safe fallback to eager execution
+        self.use_compile = bool(use_compile and self.device.type == "cuda")
+        self._train_model: torch.nn.Module = self.model
+        if self.use_compile:
+            try:
+                self._train_model = torch.compile(self.model)
+            except Exception:
+                self.use_compile = False
+                self._train_model = self.model
+
+        # Mixed precision configuration: BF16 preferred on modern CUDA, FP16+GradScaler fallback
+        if self.device.type == "cuda":
+            if torch.cuda.is_bf16_supported():
+                self._use_amp = True
+                self._amp_dtype = torch.bfloat16
+                self._use_scaler = False
+            else:
+                self._use_amp = True
+                self._amp_dtype = torch.float16
+                self._use_scaler = True
+        else:
+            self._use_amp = False
+            self._amp_dtype = torch.float32
+            self._use_scaler = False
+
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self._use_scaler)
+
+        # Linear warmup + single monotonic CosineAnnealingLR over total_iterations (no restart spikes)
+        warmup_iters = min(5, max(1, self.total_iterations // 20))
+        cosine_iters = max(1, self.total_iterations - warmup_iters)
+        self._max_scheduler_steps = warmup_iters + cosine_iters
+        eta_min = min(1e-5, lr)
+
+        warmup_scheduler = LinearLR(
+            self.optimizer,
+            start_factor=0.2,
+            end_factor=1.0,
+            total_iters=warmup_iters,
         )
+        cosine_scheduler = CosineAnnealingLR(
+            self.optimizer,
+            T_max=cosine_iters,
+            eta_min=eta_min,
+        )
+        self.scheduler = SequentialLR(
+            self.optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[warmup_iters],
+        )
+
+    def _run_batch_step(
+        self,
+        model_fn: torch.nn.Module,
+        states_t: torch.Tensor,
+        target_policies_t: torch.Tensor,
+        target_values_t: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Execute one forward + backward + optimizer step on `model_fn`."""
+        self.optimizer.zero_grad(set_to_none=True)
+
+        amp_ctx = (
+            torch.autocast(device_type="cuda", dtype=self._amp_dtype)
+            if self._use_amp
+            else nullcontext()
+        )
+        with amp_ctx:
+            policy_logits, wdl_logits = model_fn(states_t)
+
+            # Mask full columns safely (-1e4 avoids FP16 overflow and 0 * -inf NaN)
+            occupied = states_t[:, 0] + states_t[:, 1]
+            valid_moves = occupied.sum(dim=1) < ROWS
+            policy_logits = policy_logits.masked_fill(~valid_moves, -1e4)
+
+            # Policy loss: soft cross-entropy against MCTS visit distribution
+            log_probs = F.log_softmax(policy_logits.float(), dim=1)
+            policy_loss = -torch.sum(target_policies_t * log_probs, dim=1).mean()
+
+            # Value loss: WDL cross-entropy ([Loss (-1), Draw (0), Win (+1)])
+            # Exact one-hot on {-1, 0, +1} and smooth calibrated soft WDL on [-1, 1]
+            v_clamped = target_values_t.clamp(-1.0, 1.0)
+            wdl_targets = torch.stack(
+                (F.relu(-v_clamped), 1.0 - v_clamped.abs(), F.relu(v_clamped)),
+                dim=1,
+            )
+            wdl_log_probs = F.log_softmax(wdl_logits.float(), dim=1)
+            value_loss = -torch.sum(wdl_targets * wdl_log_probs, dim=1).mean()
+
+            loss = policy_loss + value_loss
+
+        if self._use_scaler:
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
+
+        return policy_loss.detach(), value_loss.detach()
 
     def train_epoch(
         self, replay_buffer: ReplayBuffer, num_batches: int | None = None
     ) -> dict[str, float]:
         """Train for one epoch (multiple mini-batches).
 
-        Args:
-            replay_buffer: Source of training data.
-            num_batches: Number of mini-batches per epoch. If None, auto-scales
-                to see each example roughly once (buffer_size // batch_size).
-
         Returns:
             Dict with 'policy_loss', 'value_loss', 'total_loss'.
         """
         self.model.train()
-        total_policy_loss = 0.0
-        total_value_loss = 0.0
-        actual_batches = 0
+        if self._train_model is not self.model and hasattr(self._train_model, "train"):
+            self._train_model.train()
 
-        if len(replay_buffer) < 2:
+        buf_len = len(replay_buffer)
+        if buf_len < 2:
             return {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
 
-        effective_batch_size = min(self.batch_size, len(replay_buffer))
-
-        # Auto-scale: one pass through the buffer per epoch
+        effective_batch_size = min(self.batch_size, buf_len)
         if num_batches is None:
-            num_batches = max(1, len(replay_buffer) // effective_batch_size)
+            num_batches = max(1, buf_len // effective_batch_size)
+        if num_batches <= 0:
+            return {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
+
+        total_policy_loss = torch.zeros((), device=self.device, dtype=torch.float32)
+        total_value_loss = torch.zeros((), device=self.device, dtype=torch.float32)
+        actual_batches = 0
 
         for _ in range(num_batches):
-            states, target_policies, target_values = replay_buffer.sample(
-                self.batch_size
-            )
+            if hasattr(replay_buffer, "sample_tensors"):
+                states_t, target_policies_t, target_values_t = (
+                    replay_buffer.sample_tensors(effective_batch_size, self.device)
+                )
+            else:
+                states_np, policies_np, values_np = replay_buffer.sample(
+                    effective_batch_size
+                )
+                states_t = torch.from_numpy(states_np).to(self.device)
+                target_policies_t = torch.from_numpy(policies_np).to(self.device)
+                target_values_t = torch.from_numpy(values_np).to(self.device)
 
-            states_t = torch.from_numpy(states).to(self.device)
-            target_policies_t = torch.from_numpy(target_policies).to(self.device)
-            target_values_t = torch.from_numpy(target_values).to(self.device)
+            if self.use_compile:
+                try:
+                    p_loss, v_loss = self._run_batch_step(
+                        self._train_model,
+                        states_t,
+                        target_policies_t,
+                        target_values_t,
+                    )
+                except Exception:
+                    self.use_compile = False
+                    self._train_model = self.model
+                    p_loss, v_loss = self._run_batch_step(
+                        self.model,
+                        states_t,
+                        target_policies_t,
+                        target_values_t,
+                    )
+            else:
+                p_loss, v_loss = self._run_batch_step(
+                    self.model,
+                    states_t,
+                    target_policies_t,
+                    target_values_t,
+                )
 
-            # Forward pass
-            policy_logits, pred_values = self.model(states_t)
-            pred_values = pred_values.squeeze(1)
-
-            # Mask invalid moves (Issue 1 Fix)
-            occupied = states_t[:, 0] + states_t[:, 1]
-            heights = occupied.sum(dim=1)
-            valid_moves = heights < ROWS
-            policy_logits = policy_logits.masked_fill(~valid_moves, -1e9)
-
-            # Policy loss: cross-entropy with MCTS policy
-            log_probs = F.log_softmax(policy_logits, dim=1)
-
-            policy_loss = -torch.sum(target_policies_t * log_probs, dim=1).mean()
-
-            # Value loss: MSE
-            value_loss = F.mse_loss(pred_values, target_values_t)
-
-            # Total loss
-            loss = policy_loss + value_loss
-
-            # Backward pass
-            self.optimizer.zero_grad()
-            loss.backward()
-
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-
-            self.optimizer.step()
-
-            total_policy_loss += policy_loss.item()
-            total_value_loss += value_loss.item()
+            total_policy_loss += p_loss
+            total_value_loss += v_loss
             actual_batches += 1
 
         if actual_batches == 0:
             return {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
 
-        avg_policy = total_policy_loss / actual_batches
-        avg_value = total_value_loss / actual_batches
+        # Single device-to-host synchronization at epoch end
+        avg_losses_cpu = (
+            torch.stack((total_policy_loss, total_value_loss)) / actual_batches
+        ).cpu()
+        avg_policy = avg_losses_cpu[0].item()
+        avg_value = avg_losses_cpu[1].item()
         return {
             "policy_loss": avg_policy,
             "value_loss": avg_value,
@@ -179,5 +467,6 @@ class Trainer:
         }
 
     def step_scheduler(self) -> None:
-        """Step the learning rate scheduler."""
-        self.scheduler.step()
+        """Step the LR scheduler, clamping safely at eta_min once total_iterations is reached."""
+        if self.scheduler.last_epoch < self._max_scheduler_steps:
+            self.scheduler.step()
