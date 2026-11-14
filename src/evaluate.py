@@ -43,6 +43,7 @@ except ImportError:
 
 DEFAULT_SOLVER_CACHE_DIR = Path("testdata/.solver_cache")
 _MEMORY_SOLVER_CACHE: dict[str, np.ndarray | None] = {}
+_MEMORY_MOVE_WDL_CACHE: dict[str, dict[str, np.ndarray]] = {}
 _CENTER_FIRST_ORDER = (3, 2, 4, 1, 5, 0, 6)
 
 
@@ -238,8 +239,12 @@ def _parse_dataset_lines(lines: list[str]) -> tuple[list[str], np.ndarray]:
     return moves_list, np.asarray(scores_list, dtype=np.int32)
 
 
-def _save_solver_cache_npz(cache_file: Path, child_wdl: np.ndarray) -> None:
-    """Atomically write `child_wdl` into `.npz` cache with self-ignoring `.gitignore`."""
+def _save_solver_cache_npz(
+    cache_file: Path,
+    child_wdl: np.ndarray,
+    moves_list: list[str] | None = None,
+) -> None:
+    """Atomically write `child_wdl` (and optional `moves`) into `.npz` cache."""
     cache_dir = cache_file.parent
     cache_dir.mkdir(parents=True, exist_ok=True)
     gitignore_path = cache_dir / ".gitignore"
@@ -248,8 +253,38 @@ def _save_solver_cache_npz(cache_file: Path, child_wdl: np.ndarray) -> None:
 
     tmp_file = cache_dir / f".{cache_file.name}.{os.getpid()}.tmp"
     with open(tmp_file, "wb") as f:
-        np.savez(f, child_wdl=child_wdl)
+        if moves_list is not None:
+            np.savez(f, child_wdl=child_wdl, moves=np.asarray(moves_list))
+        else:
+            np.savez(f, child_wdl=child_wdl)
     tmp_file.replace(cache_file)
+
+
+def _lookup_moves_in_dir_cache(
+    cache_path: Path, moves_list: list[str]
+) -> np.ndarray | None:
+    """Resolve `moves_list` from already-cached `.npz` files in `cache_path` (e.g. `--limit` subsets)."""
+    if not cache_path.exists():
+        return None
+    dir_key = str(cache_path.resolve())
+    move_map = _MEMORY_MOVE_WDL_CACHE.setdefault(dir_key, {})
+
+    if any(m not in move_map for m in moves_list):
+        for npz_path in cache_path.glob("*.npz"):
+            try:
+                with np.load(npz_path) as data:
+                    if "moves" in data and "child_wdl" in data:
+                        mv_arr = data["moves"]
+                        cw_arr = np.asarray(data["child_wdl"], dtype=np.int8)
+                        if len(mv_arr) == len(cw_arr):
+                            for mv, row in zip(mv_arr.tolist(), cw_arr):
+                                move_map[str(mv)] = row
+            except Exception:
+                continue
+
+    if all(m in move_map for m in moves_list):
+        return np.stack([move_map[m] for m in moves_list], axis=0).astype(np.int8)
+    return None
 
 
 def get_dataset_child_wdl(
@@ -268,10 +303,10 @@ def get_dataset_child_wdl(
 
     Uses `alphafour_engine.solve_batch_children_wdl` when available and caches
     results by SHA256 hash of the moves list in `testdata/.solver_cache/*.npz`
-    so subsequent calls load in <5ms. Falls back to an exact bounded-budget
-    pure-Python bitboard solver for tactical / endgame unit-test positions,
-    returning `None` only when neither cache nor Rust solver is available on
-    deep early-game positions.
+    so subsequent calls (and `--limit` subsets) load in <5ms. Falls back to an
+    exact bounded-budget pure-Python bitboard solver for tactical / endgame
+    unit-test positions, returning `None` only when neither cache nor Rust
+    solver is available on deep early-game positions.
     """
     moves_list, _ = _parse_dataset_lines(lines)
     n = len(moves_list)
@@ -300,6 +335,11 @@ def get_dataset_child_wdl(
                     return arr
             except Exception:
                 pass
+
+        subset_hit = _lookup_moves_in_dir_cache(cache_path, moves_list)
+        if subset_hit is not None and subset_hit.shape == (n, COLS):
+            _MEMORY_SOLVER_CACHE[mem_key] = subset_hit
+            return subset_hit
 
     child_wdl: np.ndarray | None = None
     solved_by_rust = False
@@ -359,7 +399,11 @@ def get_dataset_child_wdl(
             solved_by_rust or cache_path != DEFAULT_SOLVER_CACHE_DIR
         ):
             try:
-                _save_solver_cache_npz(cache_file, child_wdl)
+                _save_solver_cache_npz(cache_file, child_wdl, moves_list=moves_list)
+                dir_key = str(cache_path.resolve())
+                move_map = _MEMORY_MOVE_WDL_CACHE.setdefault(dir_key, {})
+                for mv, row in zip(moves_list, child_wdl):
+                    move_map[mv] = row
             except OSError:
                 pass
 
@@ -529,7 +573,16 @@ def _run_python_batched_mcts(
 
             for idx, node in enumerate(eval_nodes):
                 node.expand(pols_np[idx])
-                node.backpropagate(float(vals_np[idx]))
+                ns = getattr(node, "solver_state", 0)
+                if ns == 1:
+                    bval = 1.0
+                elif ns == -1:
+                    bval = -1.0
+                elif ns == 2:
+                    bval = 0.0
+                else:
+                    bval = float(vals_np[idx])
+                node.backpropagate(bval)
 
     visit_counts = np.zeros((n, COLS), dtype=np.float32)
     best_actions = np.zeros((n,), dtype=np.int64)

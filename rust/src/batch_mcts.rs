@@ -199,7 +199,11 @@ impl BatchedMCTS {
                     slot.tree.revert_virtual_loss(node_idx);
                     let policy = &policies[k * COLS..(k + 1) * COLS];
                     slot.tree.expand(node_idx, policy);
-                    slot.tree.backpropagate(node_idx, values[k] as f64);
+                    let bval = slot.tree.nodes[node_idx]
+                        .solver_state
+                        .proven_value()
+                        .unwrap_or(values[k] as f64);
+                    slot.tree.backpropagate(node_idx, bval);
                 }
                 slot.pending_nodes.clear();
                 let root = slot.tree.root();
