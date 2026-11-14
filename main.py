@@ -311,8 +311,9 @@ def main() -> None:
                 replay_buffer.load_state(buf_state)
             elif "replay_buffer" in ckpt and ckpt["replay_buffer"] is not None:
                 replay_buffer.load_state(ckpt["replay_buffer"])
-            if "scheduler_state_dict" in ckpt:
-                trainer.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            trainer.restore_scheduler(
+                start_iteration, ckpt.get("scheduler_state_dict")
+            )
             print(
                 f"   Resumed at iteration {start_iteration}, buffer size: {len(replay_buffer)}"
             )

@@ -75,6 +75,99 @@ def save_checkpoint(
     tmp_path.replace(path)
 
 
+def _restore_scheduler_from_checkpoint(
+    scheduler: Any, checkpoint: dict[str, Any]
+) -> None:
+    """Safely restore `scheduler` from `checkpoint` without mismatched `T_max` spikes."""
+    iteration = int(checkpoint.get("iteration", 0))
+    sched_sd = checkpoint.get("scheduler_state_dict")
+
+    if hasattr(scheduler, "restore_scheduler"):
+        scheduler.restore_scheduler(iteration, sched_sd)
+        return
+    if hasattr(scheduler, "_alphafour_restore"):
+        scheduler._alphafour_restore(iteration, sched_sd)
+        return
+
+    milestones = getattr(scheduler, "_milestones", None)
+    sub_scheds = getattr(scheduler, "_schedulers", None)
+    if (
+        isinstance(milestones, (list, tuple))
+        and len(milestones) == 1
+        and isinstance(sub_scheds, (list, tuple))
+        and len(sub_scheds) == 2
+        and hasattr(sub_scheds[0], "total_iters")
+        and hasattr(sub_scheds[1], "T_max")
+    ):
+        warmup_iters = int(milestones[0])
+        cosine_iters = int(sub_scheds[1].T_max)
+        horizon = warmup_iters + cosine_iters
+        child_sds = sched_sd.get("_schedulers") if isinstance(sched_sd, dict) else None
+        saved_epoch = sched_sd.get("last_epoch") if isinstance(sched_sd, dict) else None
+
+        if (
+            isinstance(sched_sd, dict)
+            and sched_sd.get("_milestones") == list(milestones)
+            and isinstance(child_sds, (list, tuple))
+            and len(child_sds) == 2
+            and isinstance(child_sds[0], dict)
+            and isinstance(child_sds[1], dict)
+            and child_sds[0].get("total_iters") == warmup_iters
+            and child_sds[1].get("T_max") == cosine_iters
+            and isinstance(saved_epoch, int)
+            and 0 <= saved_epoch <= horizon
+        ):
+            scheduler.load_state_dict(sched_sd)
+            for pg, lr_val in zip(
+                scheduler.optimizer.param_groups, scheduler.get_last_lr()
+            ):
+                pg["lr"] = float(lr_val)
+            return
+
+        from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+
+        opt = scheduler.optimizer
+        base_lrs = [float(b) for b in sub_scheds[0].base_lrs]
+        for pg, base_lr in zip(opt.param_groups, base_lrs):
+            pg["lr"] = base_lr
+            pg["initial_lr"] = base_lr
+
+        fresh = SequentialLR(
+            opt,
+            schedulers=[
+                LinearLR(
+                    opt,
+                    start_factor=float(getattr(sub_scheds[0], "start_factor", 0.2)),
+                    end_factor=float(getattr(sub_scheds[0], "end_factor", 1.0)),
+                    total_iters=warmup_iters,
+                ),
+                CosineAnnealingLR(
+                    opt,
+                    T_max=cosine_iters,
+                    eta_min=float(getattr(sub_scheds[1], "eta_min", 1e-5)),
+                ),
+            ],
+            milestones=[warmup_iters],
+        )
+        target_steps = min(max(0, iteration), horizon)
+        if target_steps > 0:
+            opt._opt_called = True  # type: ignore[attr-defined]
+            for _ in range(target_steps):
+                fresh.step()
+        scheduler.__dict__.update(fresh.__dict__)
+        for pg, lr_val in zip(opt.param_groups, scheduler.get_last_lr()):
+            pg["lr"] = float(lr_val)
+        return
+
+    if isinstance(sched_sd, dict):
+        scheduler.load_state_dict(sched_sd)
+        if hasattr(scheduler, "get_last_lr") and hasattr(scheduler, "optimizer"):
+            for pg, lr_val in zip(
+                scheduler.optimizer.param_groups, scheduler.get_last_lr()
+            ):
+                pg["lr"] = float(lr_val)
+
+
 def load_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
@@ -91,8 +184,8 @@ def load_checkpoint(
         base_model.load_state_dict(_clean_state_dict(checkpoint["model_state_dict"]))
         if optimizer is not None and "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        if scheduler is not None and "scheduler_state_dict" in checkpoint:
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if scheduler is not None:
+            _restore_scheduler_from_checkpoint(scheduler, checkpoint)
     elif isinstance(checkpoint, dict):
         base_model.load_state_dict(_clean_state_dict(checkpoint))
 

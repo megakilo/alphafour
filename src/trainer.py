@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import math
 from typing import Any
 
 import numpy as np
@@ -256,6 +257,7 @@ class Trainer:
         self.device = torch.device(device)
         self.model = model.to(self.device)
         self.batch_size = batch_size
+        self.lr = float(lr)
         self.total_iterations = max(1, int(total_iterations))
 
         # Exclude 1D parameters (BatchNorm weights/biases and Linear biases) from weight decay
@@ -309,27 +311,122 @@ class Trainer:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self._use_scaler)
 
         # Linear warmup + single monotonic CosineAnnealingLR over total_iterations (no restart spikes)
-        warmup_iters = min(5, max(1, self.total_iterations // 20))
-        cosine_iters = max(1, self.total_iterations - warmup_iters)
-        self._max_scheduler_steps = warmup_iters + cosine_iters
-        eta_min = min(1e-5, lr)
+        self._warmup_iters = min(5, max(1, self.total_iterations // 20))
+        self._cosine_iters = max(1, self.total_iterations - self._warmup_iters)
+        self._max_scheduler_steps = self._warmup_iters + self._cosine_iters
+        self._eta_min = min(1e-5, self.lr)
+        self.scheduler = self._build_scheduler()
+
+    def _build_scheduler(self) -> SequentialLR:
+        """Build a fresh LinearLR + CosineAnnealingLR schedule over `total_iterations`.
+
+        Resets `param_groups` `lr` and `initial_lr` to `self.lr` while leaving any
+        existing AdamW momentum/variance state in `self.optimizer.state` untouched.
+        """
+        for pg in self.optimizer.param_groups:
+            pg["lr"] = self.lr
+            pg["initial_lr"] = self.lr
 
         warmup_scheduler = LinearLR(
             self.optimizer,
             start_factor=0.2,
             end_factor=1.0,
-            total_iters=warmup_iters,
+            total_iters=self._warmup_iters,
         )
         cosine_scheduler = CosineAnnealingLR(
             self.optimizer,
-            T_max=cosine_iters,
-            eta_min=eta_min,
+            T_max=self._cosine_iters,
+            eta_min=self._eta_min,
         )
-        self.scheduler = SequentialLR(
+        sched = SequentialLR(
             self.optimizer,
             schedulers=[warmup_scheduler, cosine_scheduler],
-            milestones=[warmup_iters],
+            milestones=[self._warmup_iters],
         )
+        sched._alphafour_restore = self.restore_scheduler  # type: ignore[attr-defined]
+        return sched
+
+    def _scheduler_state_matches_horizon(
+        self, scheduler_state_dict: dict[str, Any] | None
+    ) -> bool:
+        """Return True iff `scheduler_state_dict` matches this Trainer's horizon and base LR."""
+        if not isinstance(scheduler_state_dict, dict):
+            return False
+        if scheduler_state_dict.get("_milestones") != [self._warmup_iters]:
+            return False
+        child_sds = scheduler_state_dict.get("_schedulers")
+        if not isinstance(child_sds, (list, tuple)) or len(child_sds) != 2:
+            return False
+        warmup_sd, cosine_sd = child_sds
+        if not isinstance(warmup_sd, dict) or not isinstance(cosine_sd, dict):
+            return False
+        if warmup_sd.get("total_iters") != self._warmup_iters:
+            return False
+        if cosine_sd.get("T_max") != self._cosine_iters:
+            return False
+        if not math.isclose(
+            float(cosine_sd.get("eta_min", -1.0)),
+            self._eta_min,
+            rel_tol=1e-6,
+            abs_tol=1e-12,
+        ):
+            return False
+        base_lrs = warmup_sd.get("base_lrs")
+        if not isinstance(base_lrs, (list, tuple)) or not base_lrs:
+            return False
+        if not all(
+            math.isclose(float(b), self.lr, rel_tol=1e-6, abs_tol=1e-12)
+            for b in base_lrs
+        ):
+            return False
+        saved_epoch = scheduler_state_dict.get("last_epoch")
+        if not isinstance(saved_epoch, int) or not (
+            0 <= saved_epoch <= self._max_scheduler_steps
+        ):
+            return False
+        return True
+
+    def restore_scheduler(
+        self,
+        iteration: int,
+        scheduler_state_dict: dict[str, Any] | None = None,
+    ) -> None:
+        """Safely restore or rebuild the LR schedule when resuming from a checkpoint.
+
+        - When `scheduler_state_dict` matches this Trainer's `total_iterations` horizon
+          (`_milestones` + `T_max`), base LR, and valid `last_epoch`, loads it directly
+          and syncs `optimizer.param_groups` `lr` to `scheduler.get_last_lr()`.
+        - When `--iterations` or `--lr` changed on resume (e.g. `50 -> 100` or
+          `100 -> 50`) or `scheduler_state_dict` is absent (legacy checkpoint), rebuilds
+          `SequentialLR` over `total_iterations` and fast-forwards cleanly to
+          `min(max(0, iteration), self._max_scheduler_steps)` without warnings or
+          cosine `T_max` overshoot spikes.
+        """
+        if self._scheduler_state_matches_horizon(scheduler_state_dict):
+            assert scheduler_state_dict is not None
+            self.scheduler.load_state_dict(scheduler_state_dict)
+            self.scheduler._alphafour_restore = self.restore_scheduler  # type: ignore[attr-defined]
+            for pg, lr_val in zip(
+                self.optimizer.param_groups, self.scheduler.get_last_lr()
+            ):
+                pg["initial_lr"] = self.lr
+                pg["lr"] = float(lr_val)
+            return
+
+        target_steps = min(max(0, int(iteration)), self._max_scheduler_steps)
+        fresh_scheduler = self._build_scheduler()
+        if target_steps > 0:
+            self.optimizer._opt_called = True  # type: ignore[attr-defined]
+            for _ in range(target_steps):
+                fresh_scheduler.step()
+
+        self.scheduler.__dict__.update(fresh_scheduler.__dict__)
+        self.scheduler._alphafour_restore = self.restore_scheduler  # type: ignore[attr-defined]
+        for pg, lr_val in zip(
+            self.optimizer.param_groups, self.scheduler.get_last_lr()
+        ):
+            pg["initial_lr"] = self.lr
+            pg["lr"] = float(lr_val)
 
     def _run_batch_step(
         self,
@@ -466,7 +563,30 @@ class Trainer:
             "total_loss": avg_policy + avg_value,
         }
 
+    def _effective_scheduler_horizon(self) -> int:
+        """Return safe step horizon bounded by both `_max_scheduler_steps` and live `T_max`."""
+        horizon = self._max_scheduler_steps
+        milestones = getattr(self.scheduler, "_milestones", None)
+        sub_scheds = getattr(self.scheduler, "_schedulers", None)
+        if (
+            isinstance(milestones, (list, tuple))
+            and len(milestones) == 1
+            and isinstance(sub_scheds, (list, tuple))
+            and len(sub_scheds) == 2
+            and hasattr(sub_scheds[1], "T_max")
+        ):
+            horizon = min(horizon, int(milestones[0]) + int(sub_scheds[1].T_max))
+        return horizon
+
     def step_scheduler(self) -> None:
         """Step the LR scheduler, clamping safely at eta_min once total_iterations is reached."""
-        if self.scheduler.last_epoch < self._max_scheduler_steps:
+        horizon = self._effective_scheduler_horizon()
+        if self.scheduler.last_epoch < horizon:
+            self.optimizer._opt_called = True  # type: ignore[attr-defined]
             self.scheduler.step()
+        else:
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = self._eta_min
+            self.scheduler._last_lr = [
+                self._eta_min for _ in self.optimizer.param_groups
+            ]

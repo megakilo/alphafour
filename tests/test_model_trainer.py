@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -632,3 +633,200 @@ def test_cuda_use_compile_and_checkpoint_clean_keys(tmp_path: Path) -> None:
     load_checkpoint(ckpt_path, fresh, device=torch.device("cpu"))
     for k, v in model.cpu().state_dict().items():
         assert torch.equal(v, fresh.state_dict()[k])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Checkpoint Resume LR Scheduler Safety (Horizon Changes & Legacy Checkpoints)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_scheduler_resume_extended_horizon_no_spike(tmp_path: Path) -> None:
+    """Resuming a 50-iter checkpoint with total_iterations=100 must never explode LR."""
+    device = torch.device("cpu")
+    rng = np.random.default_rng(123)
+    buf = ReplayBuffer(capacity=128, device=device)
+    buf.add_batch(*_make_random_examples(64, rng))
+
+    model_50 = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    trainer_50 = Trainer(
+        model=model_50, device=device, lr=1e-3, batch_size=32, total_iterations=50
+    )
+    trainer_50.train_epoch(buf, num_batches=1)  # Populate real AdamW momentum buffers
+    for _ in range(50):
+        trainer_50.step_scheduler()
+    assert math.isclose(trainer_50.optimizer.param_groups[0]["lr"], 1e-5, rel_tol=1e-6)
+
+    ckpt_50 = tmp_path / "checkpoint_0050.pt"
+    save_checkpoint(
+        model=model_50,
+        optimizer=trainer_50.optimizer,
+        iteration=50,
+        path=ckpt_50,
+        scheduler=trainer_50.scheduler,
+    )
+
+    # Reference uninterrupted 100-iter schedule
+    ref_model = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    ref_trainer = Trainer(model=ref_model, device=device, lr=1e-3, total_iterations=100)
+    ref_lrs: list[float] = []
+    for _ in range(110):
+        ref_lrs.append(ref_trainer.optimizer.param_groups[0]["lr"])
+        ref_trainer.step_scheduler()
+
+    # Path A: main.py pattern — load_checkpoint + trainer.restore_scheduler(...)
+    with warnings.catch_warnings(record=True) as caught_warnings:
+        warnings.simplefilter("always")
+        model_100 = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+        trainer_100 = Trainer(
+            model=model_100, device=device, lr=1e-3, batch_size=32, total_iterations=100
+        )
+        ckpt = load_checkpoint(ckpt_50, model_100, trainer_100.optimizer, device=device)
+        trainer_100.restore_scheduler(
+            ckpt["iteration"], ckpt.get("scheduler_state_dict")
+        )
+
+        # AdamW state must remain intact after scheduler rebuild
+        assert len(trainer_100.optimizer.state) > 0
+
+        resumed_lrs: list[float] = []
+        for _ in range(50, 110):
+            lr_now = trainer_100.optimizer.param_groups[0]["lr"]
+            assert math.isclose(
+                lr_now, trainer_100.scheduler.get_last_lr()[0], rel_tol=1e-9
+            )
+            resumed_lrs.append(lr_now)
+            trainer_100.step_scheduler()
+
+    assert len(caught_warnings) == 0, [str(w.message) for w in caught_warnings]
+
+    # Every LR from iter 50..109 must lie strictly in [1e-5, 1e-3] and match reference 100-iter curve
+    for offset, lr_val in enumerate(resumed_lrs):
+        step_idx = 50 + offset
+        assert 1e-5 - 1e-12 <= lr_val <= 1e-3 + 1e-12, (
+            f"LR out of bounds at step {step_idx}: {lr_val}"
+        )
+        assert math.isclose(lr_val, ref_lrs[step_idx], rel_tol=1e-6), (
+            f"Mismatch vs 100-iter schedule at step {step_idx}: {lr_val} vs {ref_lrs[step_idx]}"
+        )
+
+    # Strictly monotonically decreasing across cosine steps 50..100, then clamped at 1e-5
+    for idx in range(50):
+        assert resumed_lrs[idx + 1] < resumed_lrs[idx], (
+            f"Expected monotonic decay at step {50 + idx}: {resumed_lrs[idx]} -> {resumed_lrs[idx + 1]}"
+        )
+    for idx in range(50, len(resumed_lrs)):
+        assert math.isclose(resumed_lrs[idx], 1e-5, rel_tol=1e-6)
+
+    # Path B: load_checkpoint(..., scheduler=trainer.scheduler) direct helper path
+    model_100_b = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    trainer_100_b = Trainer(
+        model=model_100_b, device=device, lr=1e-3, total_iterations=100
+    )
+    load_checkpoint(
+        ckpt_50,
+        model_100_b,
+        optimizer=trainer_100_b.optimizer,
+        device=device,
+        scheduler=trainer_100_b.scheduler,
+    )
+    for step_idx in range(50, 105):
+        lr_b = trainer_100_b.optimizer.param_groups[0]["lr"]
+        assert 1e-5 - 1e-12 <= lr_b <= 1e-3 + 1e-12
+        assert math.isclose(lr_b, ref_lrs[step_idx], rel_tol=1e-6)
+        trainer_100_b.step_scheduler()
+
+
+def test_scheduler_resume_shortened_horizon_clamped_at_eta_min(tmp_path: Path) -> None:
+    """Resuming a 100-iter checkpoint (at iter 80 or 100) with total_iterations=50 clamps at eta_min."""
+    device = torch.device("cpu")
+    model_100 = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    trainer_100 = Trainer(model=model_100, device=device, lr=1e-3, total_iterations=100)
+
+    for _ in range(80):
+        trainer_100.step_scheduler()
+    ckpt_80 = tmp_path / "checkpoint_0080.pt"
+    save_checkpoint(
+        model=model_100,
+        optimizer=trainer_100.optimizer,
+        iteration=80,
+        path=ckpt_80,
+        scheduler=trainer_100.scheduler,
+    )
+
+    with warnings.catch_warnings(record=True) as caught_warnings:
+        warnings.simplefilter("always")
+        model_50 = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+        trainer_50 = Trainer(model=model_50, device=device, lr=1e-3, total_iterations=50)
+        ckpt = load_checkpoint(ckpt_80, model_50, trainer_50.optimizer, device=device)
+        trainer_50.restore_scheduler(
+            ckpt["iteration"], ckpt.get("scheduler_state_dict")
+        )
+
+        for _ in range(10):
+            for pg in trainer_50.optimizer.param_groups:
+                assert math.isclose(pg["lr"], 1e-5, rel_tol=1e-6)
+            assert math.isclose(
+                trainer_50.scheduler.get_last_lr()[0], 1e-5, rel_tol=1e-6
+            )
+            trainer_50.step_scheduler()
+
+    assert len(caught_warnings) == 0, [str(w.message) for w in caught_warnings]
+
+
+def test_scheduler_resume_legacy_checkpoint_without_scheduler_state(
+    tmp_path: Path,
+) -> None:
+    """Resuming a legacy checkpoint without scheduler_state_dict fast-forwards to iteration."""
+    device = torch.device("cpu")
+    model_legacy = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    trainer_legacy = Trainer(
+        model=model_legacy, device=device, lr=1e-3, total_iterations=100
+    )
+
+    # Save legacy checkpoint at iteration=25 WITHOUT passing scheduler=...
+    legacy_ckpt_path = tmp_path / "checkpoint_0025.pt"
+    save_checkpoint(
+        model=model_legacy,
+        optimizer=trainer_legacy.optimizer,
+        iteration=25,
+        path=legacy_ckpt_path,
+        scheduler=None,
+    )
+    raw = torch.load(legacy_ckpt_path, map_location="cpu", weights_only=False)
+    assert "scheduler_state_dict" not in raw
+
+    # Reference 100-iter schedule at steps 25..105
+    ref_model = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    ref_trainer = Trainer(model=ref_model, device=device, lr=1e-3, total_iterations=100)
+    ref_lrs: list[float] = []
+    for _ in range(105):
+        ref_lrs.append(ref_trainer.optimizer.param_groups[0]["lr"])
+        ref_trainer.step_scheduler()
+
+    with warnings.catch_warnings(record=True) as caught_warnings:
+        warnings.simplefilter("always")
+        resumed_model = AlphaZeroNet(
+            num_res_blocks=2, num_filters=32, value_channels=16
+        )
+        resumed_trainer = Trainer(
+            model=resumed_model, device=device, lr=1e-3, total_iterations=100
+        )
+        ckpt = load_checkpoint(
+            legacy_ckpt_path, resumed_model, resumed_trainer.optimizer, device=device
+        )
+        resumed_trainer.restore_scheduler(
+            ckpt["iteration"], ckpt.get("scheduler_state_dict")
+        )
+
+        # Must NOT reset to iter-0 warmup (0.0002); must equal step 25 (~0.000895)
+        lr_at_25 = resumed_trainer.optimizer.param_groups[0]["lr"]
+        assert lr_at_25 > 0.0008
+        assert math.isclose(lr_at_25, ref_lrs[25], rel_tol=1e-6)
+
+        for step_idx in range(25, 105):
+            cur_lr = resumed_trainer.optimizer.param_groups[0]["lr"]
+            assert 1e-5 - 1e-12 <= cur_lr <= 1e-3 + 1e-12
+            assert math.isclose(cur_lr, ref_lrs[step_idx], rel_tol=1e-6)
+            resumed_trainer.step_scheduler()
+
+    assert len(caught_warnings) == 0, [str(w.message) for w in caught_warnings]
