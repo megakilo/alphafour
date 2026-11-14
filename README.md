@@ -1,128 +1,169 @@
 # alphafour
 
-An AlphaZero-style AI for Connect Four, trained entirely through self-play. Uses a ResNet neural network (10 residual blocks, 128 filters, ~3M parameters) guided by Monte Carlo Tree Search (MCTS).
+An AlphaZero-style AI for Connect Four trained entirely through self-play on a single GPU (or Apple Silicon MPS / CPU). Combines a Squeeze-and-Excitation ResNet with a 3-logit Win/Draw/Loss (WDL) value head and a Rayon-parallelized Rust MCTS-Solver engine (`alphafour_engine`).
 
 ## Setup
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/):
+Requires Python 3.12+, a Rust toolchain (`cargo`), and [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync
 ```
 
+`uv sync` compiles and installs the `alphafour_engine` PyO3 extension in release mode alongside the Python dependencies. A pure-Python fallback is also included for every MCTS, self-play, and tactical solver path.
+
 ## Training
 
 ```bash
-# Full training run (~2-4 hours on Mac M-series for strong play)
+# Train with defaults (resumes automatically if checkpoints/ exists)
 uv run main.py
 
-# Custom configuration
-uv run main.py --iterations 50 --games-per-iteration 200 --simulations 400
+# Custom training run
+uv run main.py --iterations 50 --games-per-iteration 500 --training-simulations 800 --eval-simulations 400
 
-# Resume from last checkpoint (default behavior)
-uv run main.py
-
-# Start fresh
-uv run main.py --no-resume
+# Start fresh from scratch and enable torch.compile on CUDA
+uv run main.py --no-resume --compile
 ```
 
-### Training Options
+### Training Options (`main.py`)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--iterations` | 100 | Number of training iterations |
-| `--games-per-iteration` | 100 | Self-play games per iteration |
-| `--simulations` | 200 | MCTS simulations per move |
-| `--epochs` | 10 | Training epochs per iteration |
-| `--batch-size` | 256 | Mini-batch size |
-| `--lr` | 0.001 | Learning rate (cosine annealed) |
-| `--workers` | CPU count - 1 | Parallel self-play workers |
-| `--res-blocks` | 10 | Residual blocks in network |
-| `--filters` | 128 | Convolutional filters |
-| `--checkpoint-dir` | `checkpoints/` | Checkpoint directory |
-| `--no-resume` | — | Start fresh training |
+| `--iterations` | `150` | Number of self-play + training iterations |
+| `--games-per-iteration` | `1000` | Self-play games generated per iteration |
+| `--training-simulations` | `1200` | MCTS simulations per move during self-play |
+| `--eval-simulations` | `400` | MCTS simulations per move for periodic dataset, Arena, and Anchor evaluation |
+| `--eval-interval` | `5` | Run MCTS dataset eval, Paired-Opening Arena, and Anchor Elo every N iterations |
+| `--arena-games` | `40` | Number of duplicate paired-opening games per Arena / Anchor match |
+| `--epochs` | `2` | Training epochs per iteration (`4` during the first 20 iterations) |
+| `--batches-per-epoch` | auto (`<=500`) | Mini-batches per epoch (auto-scaled to buffer size, capped at 500) |
+| `--batch-size` | `256` | Training mini-batch size |
+| `--lr` | `0.001` | Peak learning rate (linear warmup + single-cycle cosine decay to `1e-5`) |
+| `--compile` / `--no-compile` | `--no-compile` | Enable `torch.compile` on CUDA during training |
+| `--res-blocks` | `10` | Number of Squeeze-and-Excitation residual blocks |
+| `--filters` | `128` | Number of convolutional filters in the residual tower |
+| `--checkpoint-dir` | `checkpoints` | Directory for model checkpoints and replay buffer state |
+| `--no-resume` | — | Start fresh instead of resuming from the latest checkpoint |
+| `--buffer-capacity` | `300000` | Contiguous ring-buffer capacity (positions) |
 
-Checkpoints are saved to `checkpoints/checkpoint_NNNN.pt` after each iteration and include model weights, optimizer state, LR scheduler state, and the full replay buffer — so training can be stopped and resumed at any time.
+Checkpoints are written atomically to `checkpoints/checkpoint_NNNN.pt` (lightweight model, optimizer, and LR scheduler state) while the replay buffer is persisted separately to an overwritten `checkpoints/replay_buffer.pt`.
 
 ## Playing
 
 ```bash
-# Human goes first (default)
+# Human plays first (Red ●)
 uv run play.py
 
-# Computer goes first
+# Computer plays first
 uv run play.py --computer-first
 
-# Show win% hints for each column
-uv run play.py --hints
+# Display column win-probability hints with tree reuse across turns
+uv run play.py --hints --simulations 800
 
-# Stronger AI (more MCTS simulations = more thinking time)
-uv run play.py --simulations 1600
-
-# Use a specific checkpoint
-uv run play.py --checkpoint checkpoints/checkpoint_0050.pt
+# Play against a specific checkpoint
+uv run play.py --checkpoint checkpoints/checkpoint_0100.pt
 ```
 
-The board is drawn in the console with colored pieces (Red ● / Yellow ●) and the last move highlighted. Enter a column number (1-7) to play, or `q` to quit.
+### Play Options (`play.py`)
 
-## Benchmarking
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--computer-first` | — | Let the AI make the opening move |
+| `--hints` | — | Display estimated win % above each valid column |
+| `--checkpoint` | latest | Path to a specific checkpoint file |
+| `--checkpoint-dir` | `checkpoints` | Directory searched when `--checkpoint` is omitted |
+| `--simulations` | `200` | MCTS simulations per move |
+| `--res-blocks` | `10` | Residual blocks in model |
+| `--filters` | `128` | Convolutional filters in model |
+| `--cpu` | — | Force CPU inference even when a GPU is available |
 
-Evaluate checkpoint quality against the [gamesolver.org test suite](http://blog.gamesolver.org/solving-connect-four/02-test-protocol/) (6000 positions across 6 difficulty levels):
+## Benchmarking & Verification
+
+Evaluate checkpoints against the [gamesolver.org test suite](http://blog.gamesolver.org/solving-connect-four/02-test-protocol/) (6,000 exact positions across 6 game-phase/difficulty splits) as well as paired-opening Arena matches:
 
 ```bash
-# Run all test files against latest checkpoint
+# Evaluate latest checkpoint with both 0-sim raw network and 400-sim MCTS
 uv run benchmark.py
 
-# Specific test file with verbose per-position output
-uv run benchmark.py --test-files testdata/Test_L3_R1 -v
+# Evaluate a specific checkpoint and measure Anchor Elo vs PureMCTSBaseline
+uv run benchmark.py --checkpoint checkpoints/checkpoint_0150.pt --eval-simulations 400 --arena-anchor
 
-# Quick check: first 100 positions, stronger search
-uv run benchmark.py --limit 100 --simulations 800
+# Evaluate MCTS only on a specific test split or position limit
+uv run benchmark.py --no-both --eval-simulations 200 --test-files testdata/Test_L3_R1 --limit 200
 
-# Benchmark a specific checkpoint
-uv run benchmark.py --checkpoint checkpoints/checkpoint_0050.pt
+# Head-to-head duplicate paired-opening Arena between two checkpoints
+uv run benchmark.py --checkpoint checkpoints/checkpoint_0150.pt --arena-vs checkpoints/checkpoint_0100.pt
 ```
 
-Reports **sign accuracy** (win/draw/loss classification) since the value head outputs a continuous score rather than exact move counts. Results are broken down per test file and by outcome category.
+### Benchmark Options (`benchmark.py`)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--checkpoint` | latest | Path to checkpoint file to evaluate |
+| `--checkpoint-dir` | `checkpoints` | Directory searched when `--checkpoint` is omitted |
+| `--eval-simulations` | `400` | MCTS simulations per move for search evaluation |
+| `--both` / `--no-both` | `--both` | Run both `0`-sim raw network intuition and `--eval-simulations` MCTS |
+| `--testdata-dir` | `testdata` | Directory containing `Test_L*_R*` files |
+| `--test-files` | all `Test_*` | Explicit dataset file path(s) to evaluate |
+| `--limit` | `None` | Cap positions evaluated per dataset file |
+| `--arena-anchor` | — | Run Paired-Opening Arena against `PureMCTSBaseline` and report Anchor Elo |
+| `--arena-vs` | `None` | Opponent checkpoint path for head-to-head Paired-Opening Arena |
+| `--arena-games` | `40` | Number of duplicate paired-opening games in Arena evaluation |
+| `--res-blocks` | `10` | Residual blocks in model |
+| `--filters` | `128` | Convolutional filters in model |
+
+### Verification Metrics
+
+- **WDL Accuracy & Per-Class Win / Draw / Loss Recall**: Evaluates 3-class outcome classification against `sign(true_score) ∈ {-1, 0, +1}` using `argmax(wdl_probs)` for raw network predictions (`0` sims) and symmetric `±(1/3)` thresholds on undiluted best-child Q-values (`-best_child.q_value`) for MCTS search (`>0` sims).
+- **Move Optimality % & Blunder %**: Uses the exact 49-bit Pascal-Pons bitboard alpha-beta solver (`solve_batch_children_wdl`, cached by SHA256 in `testdata/.solver_cache/`) to compute exact W/D/L outcomes for all 7 child columns of every test position. A chosen move is **optimal** iff its child W/D/L matches the best legal move (`sign(true_score)`), and a **blunder** iff it strictly degrades the game-theoretic outcome on a non-already-lost position.
+- **Value MSE**: Mean squared error of predicted values in `[-1, +1]` against exact game-theoretic W/D/L targets `{-1.0, 0.0, +1.0}`.
+- **Model-Isolated Paired-Opening Arena & Anchor Elo**: Active Arena games are partitioned by root mover at every ply so each model evaluates 100% of its own MCTS search tree without cross-model leaf contamination. Balanced 2–4 ply tactical-filtered openings are played twice (swapping colors) with `temperature = 0.0`, alongside absolute Elo tracking against `PureMCTSBaseline`.
 
 ## Architecture
 
 ```
-Input (3×6×7) → Conv Block → 10 Residual Blocks → ┬→ Policy Head → 7 move probabilities
-                                                    └→ Value Head  → position evaluation [-1, 1]
+Input (3×6×7) ─► Conv 3×3 (128) + BN + ReLU ─► 10 × SE-ResBlock (128)
+                                                      │
+                   ┌──────────────────────────────────┴──────────────────────────────────┐
+                   ▼                                                                     ▼
+    Policy Head: Conv 1×1 (32) + BN + ReLU                               Value Head: Conv 1×1 (16) + BN + ReLU
+          └─► Linear(32×6×7 → 7)                                               └─► Linear(16×6×7 → 256) + ReLU
+          └─► Masked Softmax over legal cols                                   └─► Linear(256 → 3) [Loss, Draw, Win]
+                                                                               └─► V = P(Win) - P(Loss) ∈ [-1, +1]
 ```
 
-- **Backend**: PyTorch with Metal (MPS) on Mac, CUDA on GPU, or CPU fallback
-- **Self-play**: Parallelized across CPU cores via `multiprocessing.Pool`
-- **Training**: Adam optimizer, cosine LR schedule, gradient clipping, 200K replay buffer
-- **Data augmentation**: Horizontal board mirroring (doubles training data)
+- **Rust Engine (`alphafour_engine`)**: Parallelized across CPU cores with Rayon (`RustBatchedSelfPlay`, `RustBatchedMCTS`, and exact bitboard solver), featuring collision-aborted virtual-loss leaf batching, exact **MCTS-Solver** (`ProvenWin` / `ProvenLoss` / `ProvenDraw` propagation), **First Play Urgency (FPU)** reduction (`c_fpu = 0.20`), `dirichlet_alpha = 0.35`, stochastic 0–4 ply opening diversification, and normalized visit-count policy targets decoupled from move selection temperature (`TEMP_THRESHOLD = 10`).
+- **Single-GPU Training**: Preallocated `uint8` ring-buffer `ReplayBuffer` (`300K` states in ~47 MB) with O(B) analytical inverse-CDF 2:1 linear recency sampling, `bfloat16` mixed precision on CUDA, decoupled `AdamW` weight decay (excluding BatchNorm and bias parameters), horizontal board-mirroring data augmentation, and linear warmup + single-cycle cosine LR schedule.
 
 ## Project Structure
 
 ```
-├── main.py              # Training entry point
-├── play.py              # Human vs AI game
-├── benchmark.py         # Checkpoint evaluation against test suite
-├── checkpoints/         # Saved model checkpoints
-├── testdata/            # gamesolver.org test positions (Test_L*_R*)
-└── src/
-    ├── game.py          # Connect Four game engine
-    ├── model.py         # AlphaZero neural network
-    ├── mcts.py          # Monte Carlo Tree Search
-    ├── self_play.py     # Parallel self-play generation
-    ├── trainer.py       # Training loop & replay buffer
-    └── utils.py         # Device detection, checkpoint I/O
+├── main.py                  # Self-play training entry point
+├── play.py                  # Interactive Human vs AI console game
+├── benchmark.py             # Dataset & Arena verification CLI
+├── rust/                    # PyO3 + Rayon Rust engine (alphafour_engine)
+│   └── src/                 # Bitboard game, MCTS-Solver, batched self-play & solver
+├── src/
+│   ├── game.py              # Python Connect Four board & tensor encoding
+│   ├── model.py             # SE-ResNet with 32-ch policy & 16-ch 3-logit WDL value head
+│   ├── mcts.py              # Python MCTS-Solver, FPU reduction & stateful tree reuse
+│   ├── self_play.py         # Batched self-play orchestration
+│   ├── trainer.py           # Contiguous GPU ring buffer & BF16 WDL trainer
+│   ├── evaluate.py          # Solver-cached dataset metrics, isolated Arena & Anchor Elo
+│   └── utils.py             # Device selection, checkpoint & replay-buffer I/O
+├── testdata/                # gamesolver.org benchmark positions (Test_L*_R*)
+└── tests/                   # Rust & Python unit test suites
 ```
 
 ## Test Data
 
 - Source: [gamesolver.org](http://blog.gamesolver.org/solving-connect-four/02-test-protocol/)
 
-| Test Set (1000 test cases each) | Test Set name     | nb moves              | nb remaining moves        |
-|-----------------------------------|-------------------|-----------------------|---------------------------|
-| Test_L3_R1                        | End-Easy          | 28 < moves            | remaining < 14            |
-| Test_L2_R1                        | Middle-Easy       | 14 < moves <= 28      | remaining < 14            |
-| Test_L2_R2                        | Middle-Medium     | 14 < moves <= 28      | 14 <= remaining < 28      |
-| Test_L1_R1                        | Begin-Easy        | moves <= 14           | remaining < 14            |
-| Test_L1_R2                        | Begin-Medium      | moves <= 14           | 14 <= remaining < 28      |
-| Test_L1_R3                        | Begin-Hard        | moves <= 14           | 28 <= remaining           |
+| Test Set (1,000 cases each) | Test Set Name | Moves Played (`nb moves`) | Remaining Moves (`nb remaining`) |
+|-----------------------------|---------------|---------------------------|----------------------------------|
+| `Test_L3_R1`                | End-Easy      | `28 < moves`              | `remaining < 14`                 |
+| `Test_L2_R1`                | Middle-Easy   | `14 < moves <= 28`        | `remaining < 14`                 |
+| `Test_L2_R2`                | Middle-Medium | `14 < moves <= 28`        | `14 <= remaining < 28`           |
+| `Test_L1_R1`                | Begin-Easy    | `moves <= 14`             | `remaining < 14`                 |
+| `Test_L1_R2`                | Begin-Medium  | `moves <= 14`             | `14 <= remaining < 28`           |
+| `Test_L1_R3`                | Begin-Hard    | `moves <= 14`             | `28 <= remaining`                |
