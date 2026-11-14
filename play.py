@@ -17,11 +17,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.game import ConnectFour, COLS
+from src.game import COLS, ConnectFour
 from src.mcts import MCTS
 from src.model import AlphaZeroNet
 from src.utils import get_device, get_latest_checkpoint
-
 
 # ANSI color codes
 RED = "\033[91m"
@@ -85,9 +84,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def display_hints(mcts: MCTS, game: ConnectFour) -> None:
+def display_hints(
+    mcts: MCTS,
+    game: ConnectFour,
+    values: dict[int, float] | None = None,
+) -> None:
     """Display win probability hints above the board."""
-    values = mcts.get_move_values(game)
+    if values is None:
+        values = mcts.get_move_values(game)
     valid = game.get_valid_moves()
 
     # Column labels (matching board grid alignment)
@@ -143,14 +147,25 @@ def get_human_move(game: ConnectFour) -> int:
             sys.exit(0)
 
 
-def get_ai_move(mcts: MCTS, game: ConnectFour) -> int:
-    """Get the AI's move using MCTS."""
-    action_probs, visit_counts = mcts.get_action_probs(
-        game, temperature=0, add_noise=False
-    )
-    action = int(np.argmax(action_probs))
+def get_ai_move(
+    mcts: MCTS,
+    game: ConnectFour,
+    show_hints: bool = False,
+) -> int:
+    """Get the AI's move using MCTS (sharing a single search when `show_hints=True`)."""
+    if show_hints:
+        visit_counts, move_values = mcts.search_with_values(game, add_noise=False)
+        if visit_counts.sum() > 0:
+            action = int(np.argmax(visit_counts))
+        else:
+            action = int(np.argmax(game.get_valid_moves()))
+    else:
+        action_probs, visit_counts = mcts.get_action_probs(
+            game, temperature=0, add_noise=False
+        )
+        action = int(np.argmax(action_probs))
+        move_values = None
 
-    # Show thinking info
     total_visits = int(visit_counts.sum())
     top_visits = int(visit_counts[action])
     confidence = top_visits / total_visits * 100 if total_visits > 0 else 0
@@ -158,6 +173,9 @@ def get_ai_move(mcts: MCTS, game: ConnectFour) -> int:
         f"  {DIM}AI plays column {action + 1} "
         f"({top_visits}/{total_visits} visits, {confidence:.0f}% confident){RESET}"
     )
+
+    if show_hints and move_values is not None:
+        display_hints(mcts, game, values=move_values)
 
     return action
 
@@ -167,6 +185,17 @@ def print_board(game: ConnectFour) -> None:
     print()
     print(game.display())
     print()
+
+
+def _clean_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Strip `_orig_mod.` prefix if checkpoint was saved from a `torch.compile` model."""
+    prefix = "_orig_mod."
+    if any(k.startswith(prefix) for k in state_dict):
+        return {
+            (k[len(prefix) :] if k.startswith(prefix) else k): v
+            for k, v in state_dict.items()
+        }
+    return state_dict
 
 
 def main() -> None:
@@ -201,14 +230,14 @@ def main() -> None:
         device
     )
 
-    # Load weights (support both full checkpoint and model-only saves)
+    # Load weights once (support both full checkpoint and model-only saves)
     checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(_clean_state_dict(checkpoint["model_state_dict"]))
         iteration = checkpoint.get("iteration", "?")
         print(f"  {DIM}Checkpoint iteration: {iteration}{RESET}")
     else:
-        model.load_state_dict(checkpoint)
+        model.load_state_dict(_clean_state_dict(checkpoint))
 
     model.eval()
 
@@ -216,7 +245,6 @@ def main() -> None:
 
     # Determine who goes first
     human_player = -1 if args.computer_first else 1
-    ai_player = -human_player
 
     if human_player == 1:
         print(f"\n  You play {RED}Red ●{RESET} (first)")
@@ -230,49 +258,52 @@ def main() -> None:
     if args.hints:
         print(f"  {GREEN}Hints enabled:{RESET} showing win% for each column")
 
-    # Game loop
-    game = ConnectFour()
-
+    # Outer session loop: reuse loaded GPU model across multiple games without recursion
     while True:
-        print_board(game)
+        mcts.reset()
+        game = ConnectFour()
 
-        if game.is_terminal():
-            result = game.get_result()
-            # result is from current player's perspective
-            # if result == -1, the last mover won
-            if result == -1.0:
-                # Last mover won — who was the last mover?
-                last_mover = -game.current_player
-                if last_mover == human_player:
-                    print(f"  {GREEN}{BOLD}🎉 You win! Congratulations!{RESET}")
+        while True:
+            print_board(game)
+
+            if game.is_terminal():
+                result = game.get_result()
+                if result == -1.0:
+                    last_mover = -game.current_player
+                    if last_mover == human_player:
+                        print(f"  {GREEN}{BOLD}🎉 You win! Congratulations!{RESET}")
+                    else:
+                        print(f"  {RED}{BOLD}💻 AI wins! Better luck next time.{RESET}")
                 else:
-                    print(f"  {RED}{BOLD}💻 AI wins! Better luck next time.{RESET}")
+                    print(f"  {YELLOW}{BOLD}🤝 It's a draw!{RESET}")
+                break
+
+            is_human_turn = game.current_player == human_player
+
+            if is_human_turn:
+                if args.hints:
+                    display_hints(mcts, game)
+
+                col = get_human_move(game)
+                game.make_move(col)
+                mcts.advance_move(col)
             else:
-                print(f"  {YELLOW}{BOLD}🤝 It's a draw!{RESET}")
+                print(f"  {DIM}AI is thinking...{RESET}", end="", flush=True)
+                col = get_ai_move(mcts, game)
+                game.make_move(col)
+                mcts.advance_move(col)
+
+        print()
+        try:
+            again = input(f"{BOLD}Play again? (y/n): {RESET}").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye! 👋")
             break
 
-        is_human_turn = game.current_player == human_player
-
-        if is_human_turn:
-            if args.hints:
-                display_hints(mcts, game)
-
-            col = get_human_move(game)
-            game.make_move(col)
-        else:
-            print(f"  {DIM}AI is thinking...{RESET}", end="", flush=True)
-            col = get_ai_move(mcts, game)
-            game.make_move(col)
-
-    # Ask to play again
-    print()
-    try:
-        again = input(f"{BOLD}Play again? (y/n): {RESET}").strip().lower()
-        if again in ("y", "yes"):
-            print()
-            main()
-    except (EOFError, KeyboardInterrupt):
-        print("\nGoodbye! 👋")
+        if again not in ("y", "yes"):
+            print("\nGoodbye! 👋")
+            break
+        print()
 
 
 if __name__ == "__main__":
