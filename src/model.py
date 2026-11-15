@@ -7,6 +7,8 @@ ResNet-based architecture with Squeeze-and-Excitation attention and dual heads:
 
 from __future__ import annotations
 
+from typing import Callable
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,7 +37,7 @@ class SEBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, c, _, _ = x.shape
-        scale = self.squeeze(x).view(b, c)
+        scale = x.mean(dim=(2, 3))
         scale = self.excite(scale).view(b, c, 1, 1)
         return x * scale
 
@@ -113,6 +115,36 @@ class AlphaZeroNet(nn.Module):
             nn.Linear(256, 3),
         )
 
+        # Non-module runtime acceleration flags (pure bools so AlphaZeroNet stays 100% picklable)
+        self._use_channels_last: bool = False
+        self._use_compiled_infer: bool = False
+
+    def optimize_for_device(
+        self, device: torch.device | str, use_compile: bool = False
+    ) -> AlphaZeroNet:
+        """Configure memory format (`channels_last`) and optional dynamic `torch.compile` for CUDA inference."""
+        dev = torch.device(device)
+        self.to(dev)
+        if dev.type == "cuda":
+            # Keep cudnn.benchmark disabled: variable MCTS leaf batch sizes B otherwise
+            # trigger exhaustive per-shape cuDNN autotuning stalls across hundreds of B values.
+            torch.backends.cudnn.benchmark = False
+            torch.set_float32_matmul_precision("high")
+            self.to(memory_format=torch.channels_last)
+            self._use_channels_last = True
+            if use_compile:
+                try:
+                    _ensure_compiled_infer_fns()
+                    self._use_compiled_infer = True
+                except Exception:
+                    self._use_compiled_infer = False
+            else:
+                self._use_compiled_infer = False
+        else:
+            self._use_channels_last = False
+            self._use_compiled_infer = False
+        return self
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
@@ -123,11 +155,69 @@ class AlphaZeroNet(nn.Module):
             policy_logits: Raw column logits of shape (batch, 7).
             wdl_logits: Raw WDL logits of shape (batch, 3) ordered [Loss, Draw, Win].
         """
+        if x.dtype == torch.uint8:
+            x = x.float()
+        if self._use_channels_last and x.ndim == 4 and x.device.type == "cuda":
+            x = x.contiguous(memory_format=torch.channels_last)
         x = self.conv_block(x)
         x = self.res_blocks(x)
         policy_logits = self.policy_head(x)
         wdl_logits = self.value_head(x)
         return policy_logits, wdl_logits
+
+    def _forward_packed_impl(
+        self, states: torch.Tensor, valid_moves: torch.Tensor
+    ) -> torch.Tensor:
+        """Fused batch inference returning contiguous `float32[B, 8]` (`[policy_0..6, value]`)."""
+        policy_logits, wdl_logits = self(states)
+        masked_logits = policy_logits.float().masked_fill(~valid_moves, -1e9)
+        policy = F.softmax(masked_logits, dim=-1)
+        wdl_probs = F.softmax(wdl_logits.float(), dim=-1)
+        value = (wdl_probs[:, 2] - wdl_probs[:, 0]).unsqueeze(-1)
+        return torch.cat((policy, value), dim=-1)
+
+    def _forward_wdl_WithMask_impl(
+        self, state: torch.Tensor, valid_mask: torch.Tensor | None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        policy_logits, wdl_logits = self(state)
+        logits_f32 = policy_logits.float()
+        if valid_mask is not None:
+            logits_f32 = logits_f32.masked_fill(~valid_mask, -1e9)
+        policy = F.softmax(logits_f32, dim=-1)
+        wdl_probs = F.softmax(wdl_logits.float(), dim=-1)
+        value = wdl_probs[..., 2] - wdl_probs[..., 0]
+        return policy, wdl_probs, value
+
+    def predict_packed(
+        self, states: torch.Tensor, valid_moves: torch.Tensor
+    ) -> torch.Tensor:
+        """Fast batched inference for MCTS returning `float32[B, 8]` (`[policy_0..6, value]`).
+
+        Accepts `uint8` or `float32` `states` of shape `(B, 3, 6, 7)` and `bool` `valid_moves` `(B, 7)`.
+        Automatically runs under `no_grad` + BF16/FP16 autocast on CUDA and uses dynamic `torch.compile`
+        when enabled via `optimize_for_device(..., use_compile=True)`.
+        """
+        dev = states.device
+        if dev.type == "cuda":
+            amp_dtype = (
+                torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            )
+            with torch.no_grad(), torch.autocast(device_type="cuda", dtype=amp_dtype):
+                # Route B >= 2 through the single dynamic compiled graph (skipping B == 1 avoids
+                # TorchDynamo's separate s0 == 1 specialization compile for tiny single-leaf tails).
+                if (
+                    self._use_compiled_infer
+                    and _COMPILED_PACKED_FN is not None
+                    and states.shape[0] > 1
+                ):
+                    try:
+                        return _COMPILED_PACKED_FN(self, states, valid_moves)
+                    except Exception:
+                        self._use_compiled_infer = False
+                return self._forward_packed_impl(states, valid_moves)
+
+        with torch.no_grad():
+            return self._forward_packed_impl(states, valid_moves)
 
     @staticmethod
     def wdl_logits_to_value(wdl_logits: torch.Tensor) -> torch.Tensor:
@@ -148,7 +238,7 @@ class AlphaZeroNet(nn.Module):
         Note: caller is responsible for calling model.eval() before inference.
 
         Args:
-            state: Board encoding, shape (3, 6, 7) or (batch, 3, 6, 7).
+            state: Board encoding (`uint8` or `float32`), shape (3, 6, 7) or (batch, 3, 6, 7).
             valid_moves: Boolean mask of valid moves, shape (7,) or (batch, 7).
 
         Returns:
@@ -161,20 +251,31 @@ class AlphaZeroNet(nn.Module):
             state = state.unsqueeze(0)
 
         with torch.no_grad():
-            policy_logits, wdl_logits = self(state)
-
+            valid_mask: torch.Tensor | None = None
             if valid_moves is not None:
                 valid_mask = torch.as_tensor(
-                    valid_moves, dtype=torch.bool, device=policy_logits.device
+                    valid_moves, dtype=torch.bool, device=state.device
                 )
                 if single and valid_mask.dim() == 1:
                     valid_mask = valid_mask.unsqueeze(0)
-                fill_value = torch.finfo(policy_logits.dtype).min
-                policy_logits = policy_logits.masked_fill(~valid_mask, fill_value)
 
-            policy = F.softmax(policy_logits.float(), dim=-1)
-            wdl_probs = F.softmax(wdl_logits.float(), dim=-1)
-            value = wdl_probs[..., 2] - wdl_probs[..., 0]
+            if (
+                self._use_compiled_infer
+                and _COMPILED_WDL_FN is not None
+                and state.device.type == "cuda"
+                and state.shape[0] > 1
+            ):
+                try:
+                    policy, wdl_probs, value = _COMPILED_WDL_FN(self, state, valid_mask)
+                except Exception:
+                    self._use_compiled_infer = False
+                    policy, wdl_probs, value = self._forward_wdl_WithMask_impl(
+                        state, valid_mask
+                    )
+            else:
+                policy, wdl_probs, value = self._forward_wdl_WithMask_impl(
+                    state, valid_mask
+                )
 
         if single:
             return policy.squeeze(0), wdl_probs.squeeze(0), value.squeeze(0)
@@ -197,3 +298,35 @@ class AlphaZeroNet(nn.Module):
         """
         policy, _, value = self.predict_wdl(state, valid_moves)
         return policy, value
+
+
+def _forward_packed_fn(
+    model: AlphaZeroNet, states: torch.Tensor, valid_moves: torch.Tensor
+) -> torch.Tensor:
+    return model._forward_packed_impl(states, valid_moves)
+
+
+def _forward_wdl_fn(
+    model: AlphaZeroNet, state: torch.Tensor, valid_mask: torch.Tensor | None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return model._forward_wdl_WithMask_impl(state, valid_mask)
+
+
+_COMPILED_PACKED_FN: (
+    Callable[[AlphaZeroNet, torch.Tensor, torch.Tensor], torch.Tensor] | None
+) = None
+_COMPILED_WDL_FN: (
+    Callable[
+        [AlphaZeroNet, torch.Tensor, torch.Tensor | None],
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    ]
+    | None
+) = None
+
+
+def _ensure_compiled_infer_fns() -> None:
+    global _COMPILED_PACKED_FN, _COMPILED_WDL_FN
+    if _COMPILED_PACKED_FN is None:
+        _COMPILED_PACKED_FN = torch.compile(_forward_packed_fn, dynamic=True)
+    if _COMPILED_WDL_FN is None:
+        _COMPILED_WDL_FN = torch.compile(_forward_wdl_fn, dynamic=True)

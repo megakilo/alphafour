@@ -9,7 +9,7 @@
 /// - Parent-relative First Play Urgency (FPU) reduction
 
 use crate::game::{ConnectFour, COLS};
-use rand_distr::{Dirichlet, Distribution};
+use rand_distr::{Distribution, Gamma};
 
 /// Exact game-theoretic solver status from `node.game.current_player`'s perspective.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,9 +41,60 @@ impl SolverState {
     }
 }
 
+/// Inline fixed-capacity child list (`<= COLS`) avoiding per-node heap allocations and drop glue.
+#[derive(Clone, Copy, Debug)]
+pub struct ChildrenList {
+    buf: [(u8, usize); COLS],
+    len: u8,
+}
+
+impl ChildrenList {
+    #[inline]
+    pub const fn new() -> Self {
+        Self {
+            buf: [(0, 0); COLS],
+            len: 0,
+        }
+    }
+
+    #[inline]
+    pub fn push(&mut self, item: (u8, usize)) {
+        debug_assert!((self.len as usize) < COLS);
+        self.buf[self.len as usize] = item;
+        self.len += 1;
+    }
+}
+
+impl Default for ChildrenList {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::ops::Deref for ChildrenList {
+    type Target = [(u8, usize)];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.buf[..self.len as usize]
+    }
+}
+
+impl<'a> IntoIterator for &'a ChildrenList {
+    type Item = &'a (u8, usize);
+    type IntoIter = std::slice::Iter<'a, (u8, usize)>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.buf[..self.len as usize].iter()
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct MCTSNode {
     pub game: ConnectFour,
-    pub children: Vec<(u8, usize)>, // (action, child_index)
+    pub children: ChildrenList, // inline (action, child_index) pairs
     pub parent: Option<usize>,
     pub visit_count: u32,
     pub total_value: f64,
@@ -55,6 +106,8 @@ pub struct MCTSNode {
     pub solver_state: SolverState,
 }
 
+const _: () = assert!(!std::mem::needs_drop::<MCTSNode>());
+
 pub struct MCTSTree {
     pub nodes: Vec<MCTSNode>,
 }
@@ -65,7 +118,7 @@ impl MCTSTree {
         let solver_state = SolverState::from_terminal_result(game.get_result());
         let root = MCTSNode {
             game,
-            children: Vec::new(),
+            children: ChildrenList::new(),
             parent: None,
             visit_count: 0,
             total_value: 0.0,
@@ -315,19 +368,19 @@ impl MCTSTree {
             return;
         }
 
-        let game = self.nodes[node_idx].game.clone();
+        let game = self.nodes[node_idx].game;
         let valid = game.get_valid_moves();
 
-        let mut children = Vec::with_capacity(COLS);
+        let mut children = ChildrenList::new();
         for col in 0..COLS {
             if valid[col] {
-                let mut child_game = game.clone();
+                let mut child_game = game;
                 child_game.make_move(col as u8);
                 let child_solver = SolverState::from_terminal_result(child_game.get_result());
                 let child_idx = self.nodes.len();
                 self.nodes.push(MCTSNode {
                     game: child_game,
-                    children: Vec::new(),
+                    children: ChildrenList::new(),
                     parent: Some(node_idx),
                     visit_count: 0,
                     total_value: 0.0,
@@ -357,20 +410,30 @@ impl MCTSTree {
         }
     }
 
-    /// Add Dirichlet noise to root's children priors.
+    /// Add Dirichlet noise to root's children priors without heap allocations.
     pub fn add_dirichlet_noise(&mut self, node_idx: usize, alpha: f64, epsilon: f64) {
-        let num_children = self.nodes[node_idx].children.len();
+        let children = self.nodes[node_idx].children;
+        let num_children = children.len();
         if num_children < 2 || alpha <= 0.0 || epsilon <= 0.0 {
             return;
         }
 
-        if let Ok(dir) = Dirichlet::new(&vec![alpha; num_children]) {
-            let noise: Vec<f64> = dir.sample(&mut rand::thread_rng());
-            let children: Vec<(u8, usize)> = self.nodes[node_idx].children.clone();
-            for (i, &(_, child_idx)) in children.iter().enumerate() {
-                let prior = self.nodes[child_idx].prior as f64;
-                self.nodes[child_idx].prior =
-                    ((1.0 - epsilon) * prior + epsilon * noise[i]) as f32;
+        if let Ok(gamma) = Gamma::new(alpha, 1.0) {
+            let mut rng = rand::thread_rng();
+            let mut raw = [0.0f64; COLS];
+            let mut sum = 0.0f64;
+            for item in raw.iter_mut().take(num_children) {
+                let g = gamma.sample(&mut rng);
+                *item = g;
+                sum += g;
+            }
+            if sum > 0.0 {
+                for (i, &(_, child_idx)) in children.iter().enumerate() {
+                    let prior = self.nodes[child_idx].prior as f64;
+                    let noise_i = raw[i] / sum;
+                    self.nodes[child_idx].prior =
+                        ((1.0 - epsilon) * prior + epsilon * noise_i) as f32;
+                }
             }
         }
     }
@@ -399,40 +462,28 @@ impl MCTSTree {
             return false;
         }
 
-        let mut old_to_new = vec![usize::MAX; self.nodes.len()];
-        let mut queue = std::collections::VecDeque::new();
-        let mut new_nodes = Vec::new();
+        let cap = (self.nodes.len() / 3).max(64);
+        let mut queue: Vec<(usize, Option<usize>)> = Vec::with_capacity(cap);
+        let mut new_nodes: Vec<MCTSNode> = Vec::with_capacity(cap);
 
-        old_to_new[child_idx] = 0;
-        queue.push_back(child_idx);
+        queue.push((child_idx, None));
+        let mut head = 0usize;
 
-        while let Some(old_idx) = queue.pop_front() {
-            let new_idx = old_to_new[old_idx];
+        while head < queue.len() {
+            let (old_idx, parent_new) = queue[head];
             let node = &self.nodes[old_idx];
 
-            let mut new_children = Vec::with_capacity(node.children.len());
+            let mut new_children = ChildrenList::new();
             for &(action, old_child_idx) in &node.children {
-                let new_child_idx = new_nodes.len() + queue.len() + 1;
-                old_to_new[old_child_idx] = new_child_idx;
-                queue.push_back(old_child_idx);
+                let new_child_idx = queue.len();
+                queue.push((old_child_idx, Some(head)));
                 new_children.push((action, new_child_idx));
             }
 
             new_nodes.push(MCTSNode {
-                game: node.game.clone(),
+                game: node.game,
                 children: new_children,
-                parent: if new_idx == 0 {
-                    None
-                } else {
-                    node.parent.and_then(|p| {
-                        let mapped = old_to_new[p];
-                        if mapped == usize::MAX {
-                            None
-                        } else {
-                            Some(mapped)
-                        }
-                    })
-                },
+                parent: parent_new,
                 visit_count: node.visit_count,
                 total_value: node.total_value,
                 prior: node.prior,
@@ -440,12 +491,7 @@ impl MCTSTree {
                 virtual_losses: 0,
                 solver_state: node.solver_state,
             });
-
-            debug_assert_eq!(new_nodes.len() - 1, new_idx);
-        }
-
-        if !new_nodes.is_empty() {
-            new_nodes[0].parent = None;
+            head += 1;
         }
 
         self.nodes = new_nodes;

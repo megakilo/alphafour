@@ -18,7 +18,7 @@ pub const BOARD_SIZE: usize = ROWS * COLS;
 /// Bits per column in the bitboard (ROWS + 1 sentinel bit).
 pub const H1: usize = ROWS + 1;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ConnectFour {
     /// Bitboard for player 1's pieces.
     pub(crate) bb_p1: u64,
@@ -224,6 +224,40 @@ impl ConnectFour {
 
         if cp == 1 {
             planes[2 * BOARD_SIZE..3 * BOARD_SIZE].fill(1.0);
+        }
+
+        planes
+    }
+
+    /// Encode board compactly as binary `u8` (`0` or `1`) `[3 * ROWS * COLS]` in C-contiguous order.
+    ///
+    /// Identical plane layout to `encode()`, using 4x less memory bandwidth (`126` bytes vs `504` bytes).
+    #[inline]
+    pub fn encode_u8(&self) -> [u8; 3 * BOARD_SIZE] {
+        let mut planes = [0u8; 3 * BOARD_SIZE];
+        let cp = self.current_player;
+
+        let (bb_cur, bb_opp) = if cp == 1 {
+            (self.bb_p1, self.bb_p2)
+        } else {
+            (self.bb_p2, self.bb_p1)
+        };
+
+        for r in 0..ROWS {
+            for c in 0..COLS {
+                let bit = 1u64 << Self::bit_index(r, c);
+                let flat_idx = r * COLS + c;
+                if bb_cur & bit != 0 {
+                    planes[flat_idx] = 1;
+                }
+                if bb_opp & bit != 0 {
+                    planes[BOARD_SIZE + flat_idx] = 1;
+                }
+            }
+        }
+
+        if cp == 1 {
+            planes[2 * BOARD_SIZE..3 * BOARD_SIZE].fill(1);
         }
 
         planes
@@ -523,5 +557,15 @@ mod tests {
 
         game.make_move(4);
         assert_eq!(game.get(0, 4), -1);
+    }
+
+    #[test]
+    fn test_encode_u8_matches_encode_f32() {
+        let g = ConnectFour::from_moves("4345621").unwrap();
+        let f = g.encode();
+        let u = g.encode_u8();
+        for i in 0..3 * BOARD_SIZE {
+            assert_eq!(u[i] as f32, f[i]);
+        }
     }
 }

@@ -62,8 +62,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--training-simulations",
         type=int,
-        default=1200,
-        help="MCTS simulations per move for training (default: 1200)",
+        default=600,
+        help="MCTS simulations per move for training (default: 600)",
     )
     parser.add_argument(
         "--eval-simulations",
@@ -110,8 +110,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--compile",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Enable torch.compile on CUDA during training (default: --no-compile)",
+        default=True,
+        help="Enable torch.compile + channels_last on CUDA for self-play, eval, and training (default: --compile)",
     )
 
     # Model
@@ -271,10 +271,12 @@ def main() -> None:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     replay_buffer_path = checkpoint_dir / "replay_buffer.pt"
 
-    # Initialize model
-    model = AlphaZeroNet(num_res_blocks=args.res_blocks, num_filters=args.filters).to(
-        device
-    )
+    # Initialize model (with channels_last + dynamic torch.compile on CUDA when enabled)
+    model = AlphaZeroNet(num_res_blocks=args.res_blocks, num_filters=args.filters)
+    if hasattr(model, "optimize_for_device"):
+        model.optimize_for_device(device, use_compile=args.compile)
+    else:
+        model.to(device)
     param_count = sum(p.numel() for p in model.parameters())
     print(f"   Parameters: {param_count:,}")
 
@@ -330,10 +332,11 @@ def main() -> None:
                 child_wdl = get_dataset_child_wdl(lines)
                 datasets.append((file_path.name, lines, child_wdl))
 
-    sp_supports_arrays = (
-        "return_arrays" in inspect.signature(run_self_play).parameters
-        and hasattr(replay_buffer, "add_batch")
+    sp_params = inspect.signature(run_self_play).parameters
+    sp_supports_arrays = "return_arrays" in sp_params and hasattr(
+        replay_buffer, "add_batch"
     )
+    sp_supports_uint8 = "return_uint8" in sp_params
 
     # Main training loop
     for iteration in range(start_iteration, args.iterations):
@@ -351,11 +354,14 @@ def main() -> None:
 
         sp_start = time.time()
         if sp_supports_arrays:
+            sp_kwargs: dict[str, Any] = {"return_arrays": True}
+            if sp_supports_uint8:
+                sp_kwargs["return_uint8"] = True
             states_arr, policies_arr, values_arr = run_self_play(
                 model=model,
                 num_games=args.games_per_iteration,
                 num_simulations=args.training_simulations,
-                return_arrays=True,
+                **sp_kwargs,
             )
             replay_buffer.add_batch(states_arr, policies_arr, values_arr)
             num_generated = len(states_arr)
@@ -476,9 +482,13 @@ def main() -> None:
                 opponent_iter = iter_num - arena_lookback
                 opponent_path = checkpoint_dir / f"checkpoint_{opponent_iter:04d}.pt"
                 if opponent_path.exists():
-                    opponent_model = AlphaZeroNet(
-                        args.res_blocks, args.filters
-                    ).to(device)
+                    opponent_model = AlphaZeroNet(args.res_blocks, args.filters)
+                    if hasattr(opponent_model, "optimize_for_device"):
+                        opponent_model.optimize_for_device(
+                            device, use_compile=args.compile
+                        )
+                    else:
+                        opponent_model.to(device)
                     try:
                         load_checkpoint(opponent_path, opponent_model, device=device)
                         opponent_model.eval()

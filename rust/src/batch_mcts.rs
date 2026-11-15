@@ -13,6 +13,7 @@ struct EvalSlot {
     game: ConnectFour,
     tree: MCTSTree,
     sims_done: usize,
+    last_batch_leaves: usize,
     initial_terminal: bool,
     pending_nodes: Vec<usize>,
     batch_offset: usize,
@@ -37,14 +38,15 @@ impl BatchedMCTS {
             .into_iter()
             .map(|game| {
                 let initial_terminal = game.is_terminal();
-                let tree = MCTSTree::new(game.clone());
+                let tree = MCTSTree::new(game);
                 let sims_done = if initial_terminal { num_simulations } else { 0 };
                 EvalSlot {
                     game,
                     tree,
                     sims_done,
+                    last_batch_leaves: LEAVES_PER_GAME,
                     initial_terminal,
-                    pending_nodes: Vec::new(),
+                    pending_nodes: Vec::with_capacity(LEAVES_PER_GAME),
                     batch_offset: 0,
                 }
             })
@@ -85,6 +87,19 @@ impl BatchedMCTS {
         (states, valid)
     }
 
+    /// Encode all `N` root positions compactly as binary `u8` `(states_u8[N*3*6*7], valid_flat[N*7])`.
+    pub fn get_root_states_u8(&self) -> (Vec<u8>, Vec<bool>) {
+        let n = self.slots.len();
+        let mut states = Vec::with_capacity(n * 3 * BOARD_SIZE);
+        let mut valid = Vec::with_capacity(n * COLS);
+
+        for slot in &self.slots {
+            states.extend_from_slice(&slot.game.encode_u8());
+            valid.extend_from_slice(&slot.game.get_valid_moves());
+        }
+        (states, valid)
+    }
+
     /// Expand all non-terminal root nodes using `policies` (`shape: (N, 7)`).
     pub fn init_roots(&mut self, policies: &[f32]) {
         let num_sims = self.num_simulations;
@@ -107,15 +122,45 @@ impl BatchedMCTS {
 
     /// True when every game slot has reached `num_simulations` or proven its root.
     pub fn is_done(&self) -> bool {
-        self.slots.iter().all(|slot| {
-            let root = slot.tree.root();
-            slot.sims_done >= self.num_simulations
-                || slot.tree.nodes[root].solver_state != SolverState::Ongoing
-        })
+        let total_slots = self.slots.len();
+        let unfinished = self
+            .slots
+            .iter()
+            .filter(|slot| {
+                let root = slot.tree.root();
+                slot.sims_done < self.num_simulations
+                    && slot.tree.nodes[root].solver_state == SolverState::Ongoing
+            })
+            .count();
+
+        if unfinished == 0 {
+            return true;
+        }
+
+        // Straggler tail guard on large eval batches (>= 64 positions):
+        // If <= 4 positions remain and all of them have >= 75% sims done and <= 2 leaves/batch, finish cleanly.
+        if total_slots >= 64 && unfinished <= 4 {
+            let min_sims = (self.num_simulations * 3) / 4;
+            return self.slots.iter().all(|slot| {
+                let root = slot.tree.root();
+                slot.sims_done >= self.num_simulations
+                    || slot.tree.nodes[root].solver_state != SolverState::Ongoing
+                    || (slot.sims_done >= min_sims && slot.last_batch_leaves <= 2)
+            });
+        }
+
+        false
     }
 
     /// Collect leaves across all unfinished games in parallel using virtual losses + collision-abort.
     pub fn collect_leaves(&mut self) -> (Vec<f32>, Vec<bool>, usize) {
+        let (states_u8, valid, count) = self.collect_leaves_u8();
+        let states_f32: Vec<f32> = states_u8.into_iter().map(|b| b as f32).collect();
+        (states_f32, valid, count)
+    }
+
+    /// Collect leaves compactly as binary `u8` planes (`4x` smaller H2D transfer).
+    pub fn collect_leaves_u8(&mut self) -> (Vec<u8>, Vec<bool>, usize) {
         if self.pending_count > 0 {
             for slot in &mut self.slots {
                 for &node_idx in &slot.pending_nodes {
@@ -130,7 +175,7 @@ impl BatchedMCTS {
         let c_puct = self.c_puct;
         let c_fpu = self.c_fpu;
 
-        let per_slot: Vec<(Vec<f32>, Vec<bool>)> = self
+        let per_slot: Vec<(Vec<u8>, Vec<bool>)> = self
             .slots
             .par_iter_mut()
             .map(|slot| {
@@ -149,7 +194,8 @@ impl BatchedMCTS {
                     slot.tree
                         .select_multiple_leaves(root, c_puct, c_fpu, false, budget);
 
-                slot.sims_done += leaves.len() + terminal_count as usize;
+                slot.last_batch_leaves = leaves.len() + terminal_count as usize;
+                slot.sims_done += slot.last_batch_leaves;
                 if slot.tree.nodes[root].solver_state != SolverState::Ongoing {
                     slot.sims_done = num_sims;
                 }
@@ -161,7 +207,7 @@ impl BatchedMCTS {
                 let mut s_buf = Vec::with_capacity(leaves.len() * 3 * BOARD_SIZE);
                 let mut v_buf = Vec::with_capacity(leaves.len() * COLS);
                 for &leaf in &leaves {
-                    s_buf.extend_from_slice(&slot.tree.nodes[leaf].game.encode());
+                    s_buf.extend_from_slice(&slot.tree.nodes[leaf].game.encode_u8());
                     v_buf.extend_from_slice(&slot.tree.nodes[leaf].game.get_valid_moves());
                 }
                 slot.pending_nodes = leaves;
@@ -203,6 +249,37 @@ impl BatchedMCTS {
                         .solver_state
                         .proven_value()
                         .unwrap_or(values[k] as f64);
+                    slot.tree.backpropagate(node_idx, bval);
+                }
+                slot.pending_nodes.clear();
+                let root = slot.tree.root();
+                if slot.tree.nodes[root].solver_state != SolverState::Ongoing {
+                    slot.sims_done = num_sims;
+                }
+            });
+        self.pending_count = 0;
+    }
+
+    /// Apply packed `(pending_count, 8)` evaluations (`row[0..7]` = policy, `row[7]` = value).
+    pub fn apply_evaluations_packed(&mut self, evals_packed: &[f32]) {
+        let num_sims = self.num_simulations;
+        let stride = COLS + 1;
+        self.slots
+            .par_iter_mut()
+            .filter(|s| !s.pending_nodes.is_empty())
+            .for_each(|slot| {
+                let offset = slot.batch_offset;
+                for (j, &node_idx) in slot.pending_nodes.iter().enumerate() {
+                    let k = offset + j;
+                    let row = &evals_packed[k * stride..(k + 1) * stride];
+                    let policy = &row[..COLS];
+                    let val = row[COLS];
+                    slot.tree.revert_virtual_loss(node_idx);
+                    slot.tree.expand(node_idx, policy);
+                    let bval = slot.tree.nodes[node_idx]
+                        .solver_state
+                        .proven_value()
+                        .unwrap_or(val as f64);
                     slot.tree.backpropagate(node_idx, bval);
                 }
                 slot.pending_nodes.clear();

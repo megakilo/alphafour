@@ -21,8 +21,8 @@ uv run main.py
 # Custom training run
 uv run main.py --iterations 50 --games-per-iteration 500 --training-simulations 800 --eval-simulations 400
 
-# Start fresh from scratch and enable torch.compile on CUDA
-uv run main.py --no-resume --compile
+# Start fresh from scratch
+uv run main.py --no-resume
 ```
 
 ### Training Options (`main.py`)
@@ -31,7 +31,7 @@ uv run main.py --no-resume --compile
 |------|---------|-------------|
 | `--iterations` | `150` | Number of self-play + training iterations |
 | `--games-per-iteration` | `1000` | Self-play games generated per iteration |
-| `--training-simulations` | `1200` | MCTS simulations per move during self-play |
+| `--training-simulations` | `600` | MCTS simulations per move during self-play |
 | `--eval-simulations` | `400` | MCTS simulations per move for periodic dataset, Arena, and Anchor evaluation |
 | `--eval-interval` | `5` | Run MCTS dataset eval, Paired-Opening Arena, and Anchor Elo every N iterations |
 | `--arena-games` | `40` | Number of duplicate paired-opening games per Arena / Anchor match |
@@ -39,7 +39,7 @@ uv run main.py --no-resume --compile
 | `--batches-per-epoch` | auto (`<=500`) | Mini-batches per epoch (auto-scaled to buffer size, capped at 500) |
 | `--batch-size` | `256` | Training mini-batch size |
 | `--lr` | `0.001` | Peak learning rate (linear warmup + single-cycle cosine decay to `1e-5`) |
-| `--compile` / `--no-compile` | `--no-compile` | Enable `torch.compile` on CUDA during training |
+| `--compile` / `--no-compile` | `--compile` | Enable `torch.compile` + `channels_last` on CUDA for self-play, eval, and training |
 | `--res-blocks` | `10` | Number of Squeeze-and-Excitation residual blocks |
 | `--filters` | `128` | Number of convolutional filters in the residual tower |
 | `--checkpoint-dir` | `checkpoints` | Directory for model checkpoints and replay buffer state |
@@ -111,6 +111,7 @@ uv run benchmark.py --checkpoint checkpoints/checkpoint_0150.pt --arena-vs check
 | `--arena-games` | `40` | Number of duplicate paired-opening games in Arena evaluation |
 | `--res-blocks` | `10` | Residual blocks in model |
 | `--filters` | `128` | Convolutional filters in model |
+| `--compile` / `--no-compile` | `--compile` | Enable `torch.compile` + `channels_last` on CUDA |
 
 ### Verification Metrics
 
@@ -132,8 +133,8 @@ Input (3×6×7) ─► Conv 3×3 (128) + BN + ReLU ─► 10 × SE-ResBlock (128
                                                                                └─► V = P(Win) - P(Loss) ∈ [-1, +1]
 ```
 
-- **Rust Engine (`alphafour_engine`)**: Parallelized across CPU cores with Rayon (`RustBatchedSelfPlay`, `RustBatchedMCTS`, and exact bitboard solver), featuring collision-aborted virtual-loss leaf batching, exact **MCTS-Solver** (`ProvenWin` / `ProvenLoss` / `ProvenDraw` propagation), **First Play Urgency (FPU)** reduction (`c_fpu = 0.20`), `dirichlet_alpha = 0.35`, stochastic 0–4 ply opening diversification, and normalized visit-count policy targets decoupled from move selection temperature (`TEMP_THRESHOLD = 10`).
-- **Single-GPU Training**: Preallocated `uint8` ring-buffer `ReplayBuffer` (`300K` states in ~47 MB) with O(B) analytical inverse-CDF 2:1 linear recency sampling, `bfloat16` mixed precision on CUDA, decoupled `AdamW` weight decay (excluding BatchNorm and bias parameters), horizontal board-mirroring data augmentation, and linear warmup + single-cycle cosine LR schedule.
+- **Rust Engine (`alphafour_engine`)**: Parallelized across CPU cores with Rayon (`RustBatchedSelfPlay`, `RustBatchedMCTS`, and exact bitboard solver), featuring barrier-free continuous self-play batching (`uint8` states + packed `float32[B, 8]` policy/value outputs), inline `Copy` MCTS arenas (`!needs_drop`), collision-aborted virtual-loss leaf batching, exact **MCTS-Solver** (`ProvenWin` / `ProvenLoss` / `ProvenDraw` propagation), **First Play Urgency (FPU)** reduction (`c_fpu = 0.20`), `dirichlet_alpha = 0.35`, stochastic 0–4 ply opening diversification, and normalized visit-count policy targets decoupled from move selection temperature (`TEMP_THRESHOLD = 10`).
+- **Single-GPU Training & Inference**: `channels_last` (`NHWC`) memory layout + dynamic `torch.compile` + `bfloat16` mixed precision on CUDA across self-play, evaluation, and training; preallocated `uint8` ring-buffer `ReplayBuffer` (`300K` states in ~47 MB) with O(B) analytical inverse-CDF 2:1 linear recency sampling; decoupled `AdamW` weight decay (excluding BatchNorm and bias parameters); horizontal board-mirroring data augmentation; and linear warmup + single-cycle cosine LR schedule.
 
 ## Project Structure
 

@@ -319,3 +319,43 @@ class TestRustBatchedMCTS:
         with pytest.raises(ValueError):
             mcts.init_roots(bad_small)
         _ = non_contig
+
+    def test_continuous_u8_self_play_and_packed_mcts_apis(self):
+        engine = RustBatchedSelfPlay(6, 16, 1.5, 0.35, 0.25, 10, 4, 0.20)
+        finished = 0
+        steps = 0
+        while not engine.is_done() and steps < 2000:
+            s_u8, valid, count, fin_c = engine.collect_continuous_u8()
+            finished += fin_c
+            if count > 0:
+                assert s_u8.shape == (count, 3, 6, 7) and s_u8.dtype == np.uint8
+                assert valid.shape == (count, 7) and valid.dtype == bool
+                packed = np.zeros((count, COLS + 1), dtype=np.float32)
+                packed[:, :COLS] = 1.0 / COLS
+                finished += engine.apply_continuous_packed(packed)
+            steps += 1
+
+        assert engine.is_done()
+        assert finished == 6
+        ex_u8, pol_u8, val_u8 = engine.take_completed_u8()
+        assert ex_u8.dtype == np.uint8 and len(ex_u8) > 0 and len(ex_u8) % 2 == 0
+        npt.assert_allclose(pol_u8.sum(axis=1), 1.0, atol=1e-5)
+        assert np.all((val_u8 >= -1.0) & (val_u8 <= 1.0))
+
+        # Verify RustBatchedMCTS u8 + packed evaluation parity on mate-in-1
+        g_mate1 = RustConnectFour.from_moves("121212")
+        mcts = RustBatchedMCTS([g_mate1], num_simulations=24)
+        rs_u8, rv = mcts.get_root_states_u8()
+        assert rs_u8.shape == (1, 3, 6, 7) and rs_u8.dtype == np.uint8
+        assert rv.shape == (1, 7)
+        mcts.init_roots(np.full((1, COLS), 1.0 / COLS, dtype=np.float32))
+        while not mcts.is_done():
+            ls_u8, lv, c = mcts.collect_leaves_u8()
+            if c > 0:
+                assert ls_u8.dtype == np.uint8
+                pk = np.zeros((c, COLS + 1), dtype=np.float32)
+                pk[:, :COLS] = 1.0 / COLS
+                mcts.apply_evaluations_packed(pk)
+        _vc, best_actions, best_values, _cq = mcts.get_results()
+        assert best_actions[0] == 0
+        assert best_values[0] == pytest.approx(1.0)

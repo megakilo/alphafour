@@ -455,38 +455,80 @@ def _run_rust_batched_mcts(
     except TypeError:
         engine = RustBatchedMCTS(rust_games, num_simulations)
 
-    root_states, root_valid = engine.get_root_states()
-    if len(root_states) > 0:
-        with torch.no_grad(), _autocast_ctx(device):
-            states_t = torch.from_numpy(root_states).to(device)
-            valid_t = torch.from_numpy(root_valid).to(device)
-            pols_t, _ = model.predict(states_t, valid_t)
-        pols_np = np.ascontiguousarray(pols_t.float().cpu().numpy(), dtype=np.float32)
-        engine.init_roots(pols_np)
-    else:
-        engine.init_roots(np.zeros((0, COLS), dtype=np.float32))
+    use_fast_packed = (
+        hasattr(model, "predict_packed")
+        and hasattr(engine, "get_root_states_u8")
+        and hasattr(engine, "collect_leaves_u8")
+        and hasattr(engine, "apply_evaluations_packed")
+    )
 
-    zero_leaf_steps = 0
-    max_zero_steps = max(8, num_simulations + 4)
-    while not engine.is_done():
-        leaf_states, leaf_valid, count = engine.collect_leaves()
-        if count > 0:
-            zero_leaf_steps = 0
+    if use_fast_packed:
+        root_states_u8, root_valid = engine.get_root_states_u8()
+        if len(root_states_u8) > 0:
+            states_t = torch.from_numpy(root_states_u8).to(device, non_blocking=True)
+            valid_t = torch.from_numpy(root_valid).to(device, non_blocking=True)
+            packed_root = model.predict_packed(states_t, valid_t)
+            pols_np = np.ascontiguousarray(
+                packed_root[:, :COLS].cpu().numpy(), dtype=np.float32
+            )
+            engine.init_roots(pols_np)
+        else:
+            engine.init_roots(np.zeros((0, COLS), dtype=np.float32))
+
+        zero_leaf_steps = 0
+        max_zero_steps = max(8, num_simulations + 4)
+        while not engine.is_done():
+            leaf_states_u8, leaf_valid, count = engine.collect_leaves_u8()
+            if count > 0:
+                zero_leaf_steps = 0
+                states_t = torch.from_numpy(leaf_states_u8).to(
+                    device, non_blocking=True
+                )
+                valid_t = torch.from_numpy(leaf_valid).to(device, non_blocking=True)
+                packed_t = model.predict_packed(states_t, valid_t)
+                packed_np = np.ascontiguousarray(
+                    packed_t.cpu().numpy(), dtype=np.float32
+                )
+                engine.apply_evaluations_packed(packed_np)
+            else:
+                zero_leaf_steps += 1
+                if zero_leaf_steps > max_zero_steps:
+                    break
+    else:
+        root_states, root_valid = engine.get_root_states()
+        if len(root_states) > 0:
             with torch.no_grad(), _autocast_ctx(device):
-                states_t = torch.from_numpy(leaf_states).to(device)
-                valid_t = torch.from_numpy(leaf_valid).to(device)
-                pols_t, vals_t = model.predict(states_t, valid_t)
+                states_t = torch.from_numpy(root_states).to(device)
+                valid_t = torch.from_numpy(root_valid).to(device)
+                pols_t, _ = model.predict(states_t, valid_t)
             pols_np = np.ascontiguousarray(
                 pols_t.float().cpu().numpy(), dtype=np.float32
             )
-            vals_np = np.ascontiguousarray(
-                vals_t.float().cpu().numpy().reshape(-1), dtype=np.float32
-            )
-            engine.apply_evaluations(pols_np, vals_np)
+            engine.init_roots(pols_np)
         else:
-            zero_leaf_steps += 1
-            if zero_leaf_steps > max_zero_steps:
-                break
+            engine.init_roots(np.zeros((0, COLS), dtype=np.float32))
+
+        zero_leaf_steps = 0
+        max_zero_steps = max(8, num_simulations + 4)
+        while not engine.is_done():
+            leaf_states, leaf_valid, count = engine.collect_leaves()
+            if count > 0:
+                zero_leaf_steps = 0
+                with torch.no_grad(), _autocast_ctx(device):
+                    states_t = torch.from_numpy(leaf_states).to(device)
+                    valid_t = torch.from_numpy(leaf_valid).to(device)
+                    pols_t, vals_t = model.predict(states_t, valid_t)
+                pols_np = np.ascontiguousarray(
+                    pols_t.float().cpu().numpy(), dtype=np.float32
+                )
+                vals_np = np.ascontiguousarray(
+                    vals_t.float().cpu().numpy().reshape(-1), dtype=np.float32
+                )
+                engine.apply_evaluations(pols_np, vals_np)
+            else:
+                zero_leaf_steps += 1
+                if zero_leaf_steps > max_zero_steps:
+                    break
 
     visit_counts, best_actions, best_values, _ = engine.get_results()
     return (

@@ -96,6 +96,12 @@ def parse_args() -> argparse.Namespace:
         default=128,
         help="Number of convolutional filters (default: 128)",
     )
+    parser.add_argument(
+        "--compile",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable torch.compile + channels_last on CUDA (default: --compile)",
+    )
     return parser.parse_args()
 
 
@@ -274,9 +280,11 @@ def main() -> None:
             return
 
     print(f"   Loading checkpoint: {checkpoint_path}")
-    model = AlphaZeroNet(num_res_blocks=args.res_blocks, num_filters=args.filters).to(
-        device
-    )
+    model = AlphaZeroNet(num_res_blocks=args.res_blocks, num_filters=args.filters)
+    if hasattr(model, "optimize_for_device"):
+        model.optimize_for_device(device, use_compile=args.compile)
+    else:
+        model.to(device)
 
     try:
         iteration = _load_model_weights(checkpoint_path, model, device=device)
@@ -358,7 +366,11 @@ def main() -> None:
         else:
             opp_model = AlphaZeroNet(
                 num_res_blocks=args.res_blocks, num_filters=args.filters
-            ).to(device)
+            )
+            if hasattr(opp_model, "optimize_for_device"):
+                opp_model.optimize_for_device(device, use_compile=args.compile)
+            else:
+                opp_model.to(device)
             try:
                 _load_model_weights(opp_path, opp_model, device=device)
                 opp_model.eval()

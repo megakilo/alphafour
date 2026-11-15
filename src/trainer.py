@@ -241,6 +241,19 @@ class ReplayBuffer:
             self.add(state)
 
 
+class _AlphaFourSequentialLR(SequentialLR):
+    """SequentialLR subclass that excludes runtime restore hooks from state_dict()."""
+
+    def state_dict(self) -> dict[str, Any]:
+        sd = super().state_dict()
+        sd.pop("_alphafour_restore", None)
+        return sd
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        cleaned = {k: v for k, v in state_dict.items() if k != "_alphafour_restore"}
+        super().load_state_dict(cleaned)
+
+
 class Trainer:
     """Single-GPU AlphaZero trainer with BF16 AMP, WDL loss, and warmup+cosine LR."""
 
@@ -256,6 +269,8 @@ class Trainer:
     ) -> None:
         self.device = torch.device(device)
         self.model = model.to(self.device)
+        if hasattr(self.model, "optimize_for_device"):
+            self.model.optimize_for_device(self.device, use_compile=use_compile)
         self.batch_size = batch_size
         self.lr = float(lr)
         self.total_iterations = max(1, int(total_iterations))
@@ -338,7 +353,7 @@ class Trainer:
             T_max=self._cosine_iters,
             eta_min=self._eta_min,
         )
-        sched = SequentialLR(
+        sched = _AlphaFourSequentialLR(
             self.optimizer,
             schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[self._warmup_iters],

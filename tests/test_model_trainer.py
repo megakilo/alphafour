@@ -830,3 +830,33 @@ def test_scheduler_resume_legacy_checkpoint_without_scheduler_state(
             resumed_trainer.step_scheduler()
 
     assert len(caught_warnings) == 0, [str(w.message) for w in caught_warnings]
+
+
+def test_predict_packed_uint8_and_dynamic_compile_equivalence() -> None:
+    """Verify optimize_for_device + predict_packed(uint8) matches eager float32 across dynamic batch sizes."""
+    torch.manual_seed(2026)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    ref = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16).to(device)
+    ref.eval()
+
+    opt = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    opt.load_state_dict(ref.state_dict())
+    opt.optimize_for_device(device, use_compile=(device.type == "cuda"))
+    opt.eval()
+
+    # state_dict keys must remain identical
+    assert list(opt.state_dict().keys()) == list(ref.state_dict().keys())
+
+    for bsz in (1, 13, 128):
+        states_u8 = torch.randint(0, 2, (bsz, 3, ROWS, COLS), dtype=torch.uint8, device=device)
+        valid = torch.ones((bsz, COLS), dtype=torch.bool, device=device)
+        valid[:, 0] = False
+
+        ref_pol, ref_val = ref.predict(states_u8.float(), valid)
+        packed = opt.predict_packed(states_u8, valid)
+        assert packed.shape == (bsz, COLS + 1)
+        assert packed.dtype == torch.float32
+        assert torch.all(packed[:, 0] == 0.0)
+        assert torch.allclose(ref_pol, packed[:, :COLS], atol=2e-2)
+        assert torch.allclose(ref_val, packed[:, COLS], atol=2e-2)

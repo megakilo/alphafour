@@ -68,7 +68,10 @@ def save_checkpoint(
     if replay_buffer is not None:
         data["replay_buffer"] = replay_buffer
     if scheduler is not None:
-        data["scheduler_state_dict"] = scheduler.state_dict()
+        sched_sd = scheduler.state_dict()
+        if isinstance(sched_sd, dict) and "_alphafour_restore" in sched_sd:
+            sched_sd = {k: v for k, v in sched_sd.items() if k != "_alphafour_restore"}
+        data["scheduler_state_dict"] = sched_sd
 
     tmp_path = path.with_suffix(".tmp")
     torch.save(data, tmp_path)

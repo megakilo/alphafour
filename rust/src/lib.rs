@@ -405,6 +405,101 @@ impl PyBatchedSelfPlay {
         py.allow_threads(|| inner.init_new_roots(pol_slice));
         Ok(())
     }
+
+    /// Barrier-free continuous leaf collection encoded as `uint8[K, 3, 6, 7]`.
+    /// Returns `(states_u8, valid, count, newly_finished_games)`.
+    #[allow(clippy::type_complexity)]
+    fn collect_continuous_u8<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> (
+        Bound<'py, PyArray4<u8>>,
+        Bound<'py, PyArray2<bool>>,
+        usize,
+        usize,
+    ) {
+        let inner = &mut self.inner;
+        let (states_u8, valid_flat, count, finished) =
+            py.allow_threads(|| inner.collect_continuous_u8());
+        (
+            vec_to_states_u8(py, states_u8, count),
+            vec_to_valid(py, valid_flat, count),
+            count,
+            finished,
+        )
+    }
+
+    /// Apply packed `float32[K, 8]` evaluations (`[policy_0..6, value]`) and advance ready games.
+    /// Returns number of newly finished games.
+    fn apply_continuous_packed(
+        &mut self,
+        py: Python<'_>,
+        evals_packed: &Bound<'_, PyArray2<f32>>,
+    ) -> PyResult<usize> {
+        let count = self.inner.num_pending();
+        if count == 0 {
+            let inner = &mut self.inner;
+            return Ok(py.allow_threads(|| inner.advance_ready_slots()));
+        }
+        let ro = evals_packed.readonly();
+        let slice = ro
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("evals_packed must be contiguous: {e}")))?;
+        let stride = COLS + 1;
+        if slice.len() < count * stride {
+            return Err(PyValueError::new_err(format!(
+                "Packed evaluation shape mismatch: pending={}, expected_len={}, got={}",
+                count,
+                count * stride,
+                slice.len()
+            )));
+        }
+        let inner = &mut self.inner;
+        let finished = py.allow_threads(|| inner.apply_continuous_packed(slice));
+        Ok(finished)
+    }
+
+    /// Take all completed continuous-mode examples as `(uint8[M,3,6,7], float32[M,7], float32[M])`.
+    #[allow(clippy::type_complexity)]
+    fn take_completed_u8<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> (
+        Bound<'py, PyArray4<u8>>,
+        Bound<'py, PyArray2<f32>>,
+        Bound<'py, PyArray1<f32>>,
+    ) {
+        let inner = &mut self.inner;
+        let (states_u8, policies_flat, values_vec, n) =
+            py.allow_threads(|| inner.take_completed_u8());
+        let states = vec_to_states_u8(py, states_u8, n);
+        let policies = Array2::from_shape_vec((n, COLS), policies_flat)
+            .expect("valid (n, 7) policies shape")
+            .into_pyarray(py);
+        let values = PyArray1::from_vec(py, values_vec);
+        (states, policies, values)
+    }
+
+    /// Take all completed continuous-mode examples as `(float32[M,3,6,7], float32[M,7], float32[M])`.
+    #[allow(clippy::type_complexity)]
+    fn take_completed_f32<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> (
+        Bound<'py, PyArray4<f32>>,
+        Bound<'py, PyArray2<f32>>,
+        Bound<'py, PyArray1<f32>>,
+    ) {
+        let inner = &mut self.inner;
+        let (states_flat, policies_flat, values_vec, n) =
+            py.allow_threads(|| inner.take_completed_f32());
+        let states = vec_to_states(py, states_flat, n);
+        let policies = Array2::from_shape_vec((n, COLS), policies_flat)
+            .expect("valid (n, 7) policies shape")
+            .into_pyarray(py);
+        let values = PyArray1::from_vec(py, values_vec);
+        (states, policies, values)
+    }
 }
 
 // ── BatchedMCTS bindings ────────────────────────────────────────────────
@@ -438,6 +533,18 @@ impl PyBatchedMCTS {
         let (states_flat, valid_flat) = py.allow_threads(|| self.inner.get_root_states());
         (
             vec_to_states(py, states_flat, n),
+            vec_to_valid(py, valid_flat, n),
+        )
+    }
+
+    fn get_root_states_u8<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> (Bound<'py, PyArray4<u8>>, Bound<'py, PyArray2<bool>>) {
+        let n = self.inner.num_games();
+        let (states_u8, valid_flat) = py.allow_threads(|| self.inner.get_root_states_u8());
+        (
+            vec_to_states_u8(py, states_u8, n),
             vec_to_valid(py, valid_flat, n),
         )
     }
@@ -484,6 +591,19 @@ impl PyBatchedMCTS {
         )
     }
 
+    fn collect_leaves_u8<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> (Bound<'py, PyArray4<u8>>, Bound<'py, PyArray2<bool>>, usize) {
+        let inner = &mut self.inner;
+        let (states_u8, valid_flat, count) = py.allow_threads(|| inner.collect_leaves_u8());
+        (
+            vec_to_states_u8(py, states_u8, count),
+            vec_to_valid(py, valid_flat, count),
+            count,
+        )
+    }
+
     fn apply_evaluations(
         &mut self,
         py: Python<'_>,
@@ -512,6 +632,33 @@ impl PyBatchedMCTS {
         }
         let inner = &mut self.inner;
         py.allow_threads(|| inner.apply_evaluations(pol_slice, val_slice));
+        Ok(())
+    }
+
+    fn apply_evaluations_packed(
+        &mut self,
+        py: Python<'_>,
+        evals_packed: &Bound<'_, PyArray2<f32>>,
+    ) -> PyResult<()> {
+        let count = self.inner.num_pending();
+        if count == 0 {
+            return Ok(());
+        }
+        let ro = evals_packed.readonly();
+        let slice = ro
+            .as_slice()
+            .map_err(|e| PyValueError::new_err(format!("evals_packed must be contiguous: {e}")))?;
+        let stride = COLS + 1;
+        if slice.len() < count * stride {
+            return Err(PyValueError::new_err(format!(
+                "Packed evaluation shape mismatch: pending={}, expected_len={}, got={}",
+                count,
+                count * stride,
+                slice.len()
+            )));
+        }
+        let inner = &mut self.inner;
+        py.allow_threads(|| inner.apply_evaluations_packed(slice));
         Ok(())
     }
 
@@ -546,6 +693,13 @@ impl PyBatchedMCTS {
 fn vec_to_states<'py>(py: Python<'py>, flat: Vec<f32>, n: usize) -> Bound<'py, PyArray4<f32>> {
     Array4::from_shape_vec((n, 3, ROWS, COLS), flat)
         .expect("valid (n, 3, 6, 7) states shape")
+        .into_pyarray(py)
+}
+
+#[inline]
+fn vec_to_states_u8<'py>(py: Python<'py>, flat: Vec<u8>, n: usize) -> Bound<'py, PyArray4<u8>> {
+    Array4::from_shape_vec((n, 3, ROWS, COLS), flat)
+        .expect("valid (n, 3, 6, 7) u8 states shape")
         .into_pyarray(py)
 }
 

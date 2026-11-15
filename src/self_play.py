@@ -56,9 +56,32 @@ def _inference_context(device: torch.device) -> Iterator[None]:
             yield
 
 
-def _empty_arrays() -> SelfPlayArrays:
+def _predict_packed_numpy(
+    model: AlphaZeroNet,
+    device: torch.device,
+    states_np: np.ndarray,
+    valid_np: np.ndarray,
+) -> np.ndarray:
+    """Run batched GPU inference and return contiguous `float32[K, 8]` (`[policy_0..6, value]`)."""
+    states_t = torch.from_numpy(states_np).to(device, non_blocking=True)
+    valid_t = torch.from_numpy(valid_np).to(device, non_blocking=True)
+    if hasattr(model, "predict_packed"):
+        packed_t = model.predict_packed(states_t, valid_t)
+        return np.ascontiguousarray(packed_t.cpu().numpy(), dtype=np.float32)
+
+    with _inference_context(device):
+        states_f = states_t.float() if states_t.dtype == torch.uint8 else states_t
+        policies, values = model.predict(states_f, valid_t)
+        packed_t = torch.cat(
+            (policies.float(), values.float().reshape(-1, 1)), dim=-1
+        )
+    return np.ascontiguousarray(packed_t.cpu().numpy(), dtype=np.float32)
+
+
+def _empty_arrays(uint8_states: bool = False) -> SelfPlayArrays:
+    state_dtype = np.uint8 if uint8_states else np.float32
     return (
-        np.empty((0, 3, ROWS, COLS), dtype=np.float32),
+        np.empty((0, 3, ROWS, COLS), dtype=state_dtype),
         np.empty((0, COLS), dtype=np.float32),
         np.empty((0,), dtype=np.float32),
     )
@@ -127,6 +150,7 @@ def play_batched_games(
     random_opening_plies: int = RANDOM_OPENING_PLIES,
     c_fpu: float = DEFAULT_C_FPU,
     return_arrays: bool = False,
+    return_uint8: bool = False,
 ) -> list[SelfPlayExample] | SelfPlayArrays:
     """Play multiple self-play games simultaneously using Batched MCTS.
 
@@ -146,8 +170,9 @@ def play_batched_games(
             random_opening_plies=random_opening_plies,
             c_fpu=c_fpu,
             return_arrays=return_arrays,
+            return_uint8=return_uint8,
         )
-    return _play_batched_python(
+    out = _play_batched_python(
         model=model,
         num_games=num_games,
         num_simulations=num_simulations,
@@ -159,6 +184,10 @@ def play_batched_games(
         c_fpu=c_fpu,
         return_arrays=return_arrays,
     )
+    if return_arrays and return_uint8:
+        st, pol, val = out  # type: ignore[misc]
+        return np.ascontiguousarray(st > 0.5, dtype=np.uint8), pol, val
+    return out
 
 
 def _play_batched_rust(
@@ -172,10 +201,11 @@ def _play_batched_rust(
     random_opening_plies: int = RANDOM_OPENING_PLIES,
     c_fpu: float = DEFAULT_C_FPU,
     return_arrays: bool = False,
+    return_uint8: bool = False,
 ) -> list[SelfPlayExample] | SelfPlayArrays:
     """High-performance self-play using the Rust MCTS engine."""
     if num_games <= 0:
-        return _empty_arrays() if return_arrays else []
+        return _empty_arrays(uint8_states=return_uint8) if return_arrays else []
 
     device = next(model.parameters()).device
     model.eval()
@@ -200,6 +230,50 @@ def _play_batched_rust(
             dirichlet_epsilon,
             temp_threshold,
             random_opening_plies,
+        )
+
+    # Fast path: barrier-free continuous self-play with compact uint8 H2D & single packed D2H transfer
+    if hasattr(engine, "collect_continuous_u8") and hasattr(
+        engine, "apply_continuous_packed"
+    ):
+        pbar = tqdm(total=num_games, desc="    Self-play", unit="game")
+        while not engine.is_done():
+            leaf_states_u8, leaf_valid, count, fin_collect = (
+                engine.collect_continuous_u8()
+            )
+            if fin_collect > 0:
+                pbar.update(fin_collect)
+            if count > 0:
+                packed_np = _predict_packed_numpy(
+                    model, device, leaf_states_u8, leaf_valid
+                )
+                fin_apply = engine.apply_continuous_packed(packed_np)
+                if fin_apply > 0:
+                    pbar.update(fin_apply)
+            elif engine.is_done():
+                break
+        pbar.close()
+
+        if return_arrays:
+            if return_uint8:
+                s_u8, pol_arr, val_arr = engine.take_completed_u8()
+                return (
+                    np.ascontiguousarray(s_u8, dtype=np.uint8),
+                    np.ascontiguousarray(pol_arr, dtype=np.float32),
+                    np.ascontiguousarray(val_arr, dtype=np.float32),
+                )
+            s_f32, pol_arr, val_arr = engine.take_completed_f32()
+            return (
+                np.ascontiguousarray(s_f32, dtype=np.float32),
+                np.ascontiguousarray(pol_arr, dtype=np.float32),
+                np.ascontiguousarray(val_arr, dtype=np.float32),
+            )
+
+        s_f32, pol_arr, val_arr = engine.take_completed_f32()
+        return _arrays_to_examples(
+            np.ascontiguousarray(s_f32, dtype=np.float32),
+            np.ascontiguousarray(pol_arr, dtype=np.float32),
+            np.ascontiguousarray(val_arr, dtype=np.float32),
         )
 
     has_unexpanded_api = hasattr(engine, "get_unexpanded_root_states") and hasattr(
@@ -326,7 +400,7 @@ def _play_batched_rust(
     pbar.close()
 
     if not all_states:
-        return _empty_arrays() if return_arrays else []
+        return _empty_arrays(uint8_states=return_uint8) if return_arrays else []
 
     states_arr = np.ascontiguousarray(np.concatenate(all_states, axis=0), dtype=np.float32)
     policies_arr = np.ascontiguousarray(
@@ -335,6 +409,12 @@ def _play_batched_rust(
     values_arr = np.ascontiguousarray(np.concatenate(all_values, axis=0), dtype=np.float32)
 
     if return_arrays:
+        if return_uint8:
+            return (
+                np.ascontiguousarray(states_arr > 0.5, dtype=np.uint8),
+                policies_arr,
+                values_arr,
+            )
         return states_arr, policies_arr, values_arr
     return _arrays_to_examples(states_arr, policies_arr, values_arr)
 
@@ -620,8 +700,9 @@ def augment_arrays(
 
     mirrored_states = states[:, :, :, ::-1]
     mirrored_policies = policies[:, ::-1]
+    state_dtype = np.uint8 if states.dtype == np.uint8 else np.float32
     aug_states = np.ascontiguousarray(
-        np.concatenate([states, mirrored_states], axis=0), dtype=np.float32
+        np.concatenate([states, mirrored_states], axis=0), dtype=state_dtype
     )
     aug_policies = np.ascontiguousarray(
         np.concatenate([policies, mirrored_policies], axis=0), dtype=np.float32
@@ -643,14 +724,15 @@ def run_self_play(
     random_opening_plies: int = RANDOM_OPENING_PLIES,
     c_fpu: float = DEFAULT_C_FPU,
     return_arrays: bool = False,
+    return_uint8: bool = False,
 ) -> list[SelfPlayExample] | SelfPlayArrays:
     """Run self-play games using Batched MCTS with horizontal mirror augmentation.
 
     When `return_arrays=True`, returns `(states_arr, policies_arr, values_arr)` as
-    contiguous `float32` numpy arrays `(N, 3, 6, 7), (N, 7), (N,)` with zero Python
-    per-example tuple loop. When `return_arrays=False` (default), returns
-    `list[tuple[np.ndarray, np.ndarray, float]]`.
+    contiguous numpy arrays `(N, 3, 6, 7), (N, 7), (N,)` (`uint8` states when
+    `return_uint8=True`, else `float32`) with zero Python per-example tuple loop.
     """
+    extra_kwargs = {"return_uint8": True} if return_uint8 else {}
     result = play_batched_games(
         model=model,
         num_games=num_games,
@@ -662,6 +744,7 @@ def run_self_play(
         random_opening_plies=random_opening_plies,
         c_fpu=c_fpu,
         return_arrays=return_arrays,
+        **extra_kwargs,
     )
 
     # Rust engine already emits augmented pairs directly
