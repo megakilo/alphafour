@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -37,7 +38,14 @@ from src.game import COLS, ROWS
 from src.model import AlphaZeroNet
 from src.self_play import run_self_play
 from src.trainer import ReplayBuffer, Trainer
-from src.utils import _clean_state_dict, _unwrap_model, load_checkpoint, save_checkpoint
+from src.utils import (
+    _BenignTorchCompileLogFilter,
+    _clean_state_dict,
+    _unwrap_model,
+    configure_torch_compiler,
+    load_checkpoint,
+    save_checkpoint,
+)
 
 
 class _FakeCompiledWrapper(torch.nn.Module):
@@ -167,6 +175,44 @@ def test_main_gpus_cli_flag(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(sys, "argv", ["main.py", "--gpus", "2"])
     assert main_cli.parse_args().gpus == 2
+
+
+def test_configure_torch_compiler_suppresses_benign_warnings_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`configure_torch_compiler` disables small-tensor online softmax and filters benign compile noise."""
+    import torch._dynamo.config as dyn_cfg
+    import torch._inductor.config as ind_cfg
+
+    configure_torch_compiler()
+    configure_torch_compiler()  # Must be idempotent
+    assert ind_cfg.online_softmax is False
+
+    for name in ("torch._inductor.utils", "torch._dynamo.variables.ctx_manager"):
+        filters = [
+            f
+            for f in logging.getLogger(name).filters
+            if isinstance(f, _BenignTorchCompileLogFilter)
+        ]
+        assert len(filters) == 1
+
+    flt = _BenignTorchCompileLogFilter()
+    monkeypatch.setattr(ind_cfg, "max_autotune", False)
+    monkeypatch.setattr(ind_cfg, "max_autotune_gemm", False)
+    monkeypatch.setattr(dyn_cfg, "capture_profiler_record_function", False)
+
+    def _rec(msg: str) -> logging.LogRecord:
+        return logging.LogRecord("test", logging.WARNING, __file__, 1, msg, (), None)
+
+    assert not flt.filter(_rec("Not enough SMs to use max_autotune_gemm mode"))
+    assert not flt.filter(
+        _rec("Profiler record function <class 'x'> will be ignored")
+    )
+    assert flt.filter(_rec("Graph break in user code"))
+
+    # If user explicitly requests max_autotune, do not silence the SM warning
+    monkeypatch.setattr(ind_cfg, "max_autotune", True)
+    assert flt.filter(_rec("Not enough SMs to use max_autotune_gemm mode"))
 
 
 # ── 3. Multi-Process Gloo DDP End-to-End Parity Tests ───────────────────────

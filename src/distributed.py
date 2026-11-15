@@ -49,6 +49,8 @@ def configure_rayon_threads(world_size: int) -> int:
     threads = max(1, (os.cpu_count() or 1) // ws)
     if ws > 1:
         os.environ.setdefault("RAYON_NUM_THREADS", str(threads))
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("TORCHINDUCTOR_ONLINE_SOFTMAX", "0")
     return int(os.environ.get("RAYON_NUM_THREADS", str(threads)))
 
 

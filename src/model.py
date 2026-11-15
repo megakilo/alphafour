@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .game import ROWS, COLS
+from .utils import configure_torch_compiler
 
 
 class SEBlock(nn.Module):
@@ -134,6 +135,7 @@ class AlphaZeroNet(nn.Module):
             self._use_channels_last = True
             if use_compile:
                 try:
+                    configure_torch_compiler()
                     _ensure_compiled_infer_fns()
                     self._use_compiled_infer = True
                 except Exception:
@@ -326,6 +328,7 @@ _COMPILED_WDL_FN: (
 
 def _ensure_compiled_infer_fns() -> None:
     global _COMPILED_PACKED_FN, _COMPILED_WDL_FN
+    configure_torch_compiler()
     if _COMPILED_PACKED_FN is None:
         _COMPILED_PACKED_FN = torch.compile(_forward_packed_fn, dynamic=True)
     if _COMPILED_WDL_FN is None:

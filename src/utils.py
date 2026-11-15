@@ -2,11 +2,53 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
 
 import torch
+
+
+class _BenignTorchCompileLogFilter(logging.Filter):
+    """Suppress known benign PyTorch Inductor/Dynamo log warnings under default compile settings."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "Not enough SMs to use max_autotune_gemm mode" in msg:
+            try:
+                import torch._inductor.config as ind_cfg
+
+                if not (ind_cfg.max_autotune or ind_cfg.max_autotune_gemm):
+                    return False
+            except Exception:
+                return False
+        if "Profiler record function" in msg and "will be ignored" in msg:
+            try:
+                import torch._dynamo.config as dyn_cfg
+
+                if not dyn_cfg.capture_profiler_record_function:
+                    return False
+            except Exception:
+                return False
+        return True
+
+
+def configure_torch_compiler() -> None:
+    """Configure TorchInductor/Dynamo defaults cleanly and suppress benign small-head warnings."""
+    os.environ.setdefault("TORCHINDUCTOR_ONLINE_SOFTMAX", "0")
+    try:
+        import torch._inductor.config as ind_cfg
+
+        ind_cfg.online_softmax = False
+    except Exception:
+        pass
+
+    for logger_name in ("torch._inductor.utils", "torch._dynamo.variables.ctx_manager"):
+        logger = logging.getLogger(logger_name)
+        if not any(isinstance(f, _BenignTorchCompileLogFilter) for f in logger.filters):
+            logger.addFilter(_BenignTorchCompileLogFilter())
 
 
 def get_device() -> torch.device:

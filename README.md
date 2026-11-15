@@ -22,7 +22,7 @@ uv run main.py
 uv run main.py --gpus 1
 
 # Or launch explicitly with torchrun
-uv run torchrun --nproc_per_node=2 main.py
+OMP_NUM_THREADS=1 uv run torchrun --standalone --nproc_per_node=2 main.py
 
 # Custom training run
 uv run main.py --iterations 50 --games-per-iteration 500 --training-simulations 800 --eval-simulations 400

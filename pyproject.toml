@@ -16,6 +16,9 @@ alphafour-engine = { path = "rust", editable = true }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+filterwarnings = [
+    "ignore:`torch\\.jit\\.script_method` is deprecated:DeprecationWarning:torch\\.jit\\._script",
+]
 
 [dependency-groups]
 dev = [

@@ -27,6 +27,8 @@ if _env_ws > 1:
     os.environ.setdefault(
         "RAYON_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // _env_ws))
     )
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("TORCHINDUCTOR_ONLINE_SOFTMAX", "0")
 
 import numpy as np
 import torch

@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from .distributed import get_comm_device, get_world_size, is_dist_initialized
 from .game import COLS, ROWS
 from .model import AlphaZeroNet
-from .utils import _align_optimizer_state
+from .utils import _align_optimizer_state, configure_torch_compiler
 
 
 class ReplayBuffer:
@@ -342,6 +342,7 @@ class Trainer:
         self._train_model: torch.nn.Module = self._base_train_model
         if self.use_compile:
             try:
+                configure_torch_compiler()
                 self._train_model = torch.compile(self._base_train_model)
             except Exception:
                 self.use_compile = False
