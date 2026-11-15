@@ -171,6 +171,40 @@ def _restore_scheduler_from_checkpoint(
                 pg["lr"] = float(lr_val)
 
 
+def _align_optimizer_state(optimizer: torch.optim.Optimizer) -> None:
+    """Align optimizer state tensors to each parameter's device, dtype, and memory format/strides.
+
+    CUDA fused AdamW requires `params`, `grads`, `exp_avg`, and `exp_avg_sq` to share the exact
+    same dtype, device, and layout/strides (e.g. when resuming an NCHW checkpoint into a
+    `channels_last` NHWC model, or vice versa, or across CPU <-> CUDA).
+    """
+    default_fused = bool(optimizer.defaults.get("fused", False))
+    for group in optimizer.param_groups:
+        group_fused = bool(group.get("fused", default_fused))
+        for p in group["params"]:
+            state = optimizer.state.get(p)
+            if not state:
+                continue
+            for key, val in list(state.items()):
+                if not torch.is_tensor(val):
+                    continue
+                if val.shape == p.shape and p.ndim > 0:
+                    if (
+                        val.device != p.device
+                        or val.dtype != p.dtype
+                        or val.stride() != p.stride()
+                    ):
+                        aligned = torch.empty_like(
+                            p, memory_format=torch.preserve_format
+                        )
+                        aligned.copy_(val)
+                        state[key] = aligned
+                elif key == "step":
+                    target_dev = p.device if group_fused else torch.device("cpu")
+                    if val.device != target_dev or val.dtype != torch.float32:
+                        state[key] = val.to(device=target_dev, dtype=torch.float32)
+
+
 def load_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
@@ -187,6 +221,7 @@ def load_checkpoint(
         base_model.load_state_dict(_clean_state_dict(checkpoint["model_state_dict"]))
         if optimizer is not None and "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            _align_optimizer_state(optimizer)
         if scheduler is not None:
             _restore_scheduler_from_checkpoint(scheduler, checkpoint)
     elif isinstance(checkpoint, dict):

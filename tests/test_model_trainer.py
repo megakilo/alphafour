@@ -860,3 +860,141 @@ def test_predict_packed_uint8_and_dynamic_compile_equivalence() -> None:
         assert torch.all(packed[:, 0] == 0.0)
         assert torch.allclose(ref_pol, packed[:, :COLS], atol=2e-2)
         assert torch.allclose(ref_val, packed[:, COLS], atol=2e-2)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Single-GPU CUDA checkpoint resume test")
+def test_resume_nchw_and_cpu_checkpoints_into_cuda_channels_last_fused_adamw(
+    tmp_path: Path,
+) -> None:
+    """Resuming NCHW/CPU checkpoints into channels_last compiled CUDA Trainer must align optimizer state."""
+    cuda_dev = torch.device("cuda")
+    cpu_dev = torch.device("cpu")
+    rng = np.random.default_rng(314)
+    st_np, pol_np, val_np = _make_random_examples(128, rng)
+
+    # 1. Legacy NCHW CUDA checkpoint (exp_avg / exp_avg_sq stored with NCHW strides)
+    nchw_model = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    nchw_trainer = Trainer(
+        model=nchw_model,
+        device=cuda_dev,
+        lr=1e-3,
+        batch_size=32,
+        total_iterations=50,
+        use_compile=False,
+    )
+    # Revert model back to contiguous NCHW before first optimizer step to mirror pre-NHWC checkpoints
+    nchw_model.to(memory_format=torch.contiguous_format)
+    nchw_model._use_channels_last = False
+
+    cuda_buf = ReplayBuffer(capacity=256, device=cuda_dev)
+    cuda_buf.add_batch(st_np, pol_np, val_np)
+    assert math.isfinite(nchw_trainer.train_epoch(cuda_buf, num_batches=2)["total_loss"])
+
+    first_conv = nchw_model.conv_block[0].weight
+    assert first_conv.stride() == (27, 9, 3, 1)
+    assert nchw_trainer.optimizer.state[first_conv]["exp_avg"].stride() == (27, 9, 3, 1)
+
+    nchw_ckpt = tmp_path / "nchw_cuda.pt"
+    save_checkpoint(
+        nchw_model,
+        nchw_trainer.optimizer,
+        iteration=7,
+        path=nchw_ckpt,
+        scheduler=nchw_trainer.scheduler,
+    )
+
+    # Resume legacy NCHW CUDA checkpoint into channels_last + torch.compile CUDA Trainer
+    nhwc_model = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    nhwc_trainer = Trainer(
+        model=nhwc_model,
+        device=cuda_dev,
+        lr=1e-3,
+        batch_size=32,
+        total_iterations=50,
+        use_compile=True,
+    )
+    load_checkpoint(
+        nchw_ckpt,
+        nhwc_model,
+        optimizer=nhwc_trainer.optimizer,
+        device=cuda_dev,
+        scheduler=nhwc_trainer.scheduler,
+    )
+    losses_nhwc = nhwc_trainer.train_epoch(cuda_buf, num_batches=2)
+    assert math.isfinite(losses_nhwc["total_loss"])
+    for p in nhwc_model.parameters():
+        if p.ndim == 4:
+            st = nhwc_trainer.optimizer.state[p]
+            assert st["exp_avg"].stride() == p.stride()
+            assert st["exp_avg_sq"].stride() == p.stride()
+
+    # 2. Cross-device resume: CPU NCHW checkpoint -> CUDA NHWC compiled -> CPU NCHW
+    cpu_buf = ReplayBuffer(capacity=256, device=cpu_dev)
+    cpu_buf.add_batch(st_np, pol_np, val_np)
+    cpu_model = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    cpu_trainer = Trainer(
+        model=cpu_model,
+        device=cpu_dev,
+        lr=1e-3,
+        batch_size=32,
+        total_iterations=50,
+        use_compile=False,
+    )
+    assert math.isfinite(cpu_trainer.train_epoch(cpu_buf, num_batches=2)["total_loss"])
+    cpu_ckpt = tmp_path / "cpu_nchw.pt"
+    save_checkpoint(
+        cpu_model,
+        cpu_trainer.optimizer,
+        iteration=3,
+        path=cpu_ckpt,
+        scheduler=cpu_trainer.scheduler,
+    )
+
+    cu_from_cpu_model = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    cu_from_cpu_trainer = Trainer(
+        model=cu_from_cpu_model,
+        device=cuda_dev,
+        lr=1e-3,
+        batch_size=32,
+        total_iterations=50,
+        use_compile=True,
+    )
+    load_checkpoint(
+        cpu_ckpt,
+        cu_from_cpu_model,
+        optimizer=cu_from_cpu_trainer.optimizer,
+        device=cuda_dev,
+        scheduler=cu_from_cpu_trainer.scheduler,
+    )
+    assert math.isfinite(
+        cu_from_cpu_trainer.train_epoch(cuda_buf, num_batches=2)["total_loss"]
+    )
+
+    nhwc_saved_ckpt = tmp_path / "cuda_nhwc.pt"
+    save_checkpoint(
+        cu_from_cpu_model,
+        cu_from_cpu_trainer.optimizer,
+        iteration=4,
+        path=nhwc_saved_ckpt,
+        scheduler=cu_from_cpu_trainer.scheduler,
+    )
+
+    cpu_resumed_model = AlphaZeroNet(num_res_blocks=2, num_filters=32, value_channels=16)
+    cpu_resumed_trainer = Trainer(
+        model=cpu_resumed_model,
+        device=cpu_dev,
+        lr=1e-3,
+        batch_size=32,
+        total_iterations=50,
+        use_compile=False,
+    )
+    load_checkpoint(
+        nhwc_saved_ckpt,
+        cpu_resumed_model,
+        optimizer=cpu_resumed_trainer.optimizer,
+        device=cpu_dev,
+        scheduler=cpu_resumed_trainer.scheduler,
+    )
+    assert math.isfinite(
+        cpu_resumed_trainer.train_epoch(cpu_buf, num_batches=2)["total_loss"]
+    )

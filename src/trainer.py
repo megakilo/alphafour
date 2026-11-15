@@ -13,6 +13,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from .game import COLS, ROWS
 from .model import AlphaZeroNet
+from .utils import _align_optimizer_state
 
 
 class ReplayBuffer:
@@ -443,6 +444,15 @@ class Trainer:
             pg["initial_lr"] = self.lr
             pg["lr"] = float(lr_val)
 
+    @staticmethod
+    def _align_grad_layouts(model: torch.nn.Module) -> None:
+        """Ensure parameter gradients match each parameter's stride/layout for fused AdamW."""
+        for p in model.parameters():
+            if p.grad is not None and p.grad.stride() != p.stride():
+                aligned_grad = torch.empty_like(p, memory_format=torch.preserve_format)
+                aligned_grad.copy_(p.grad)
+                p.grad = aligned_grad
+
     def _run_batch_step(
         self,
         model_fn: torch.nn.Module,
@@ -486,11 +496,13 @@ class Trainer:
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self._align_grad_layouts(self.model)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self._align_grad_layouts(self.model)
             self.optimizer.step()
 
         return policy_loss.detach(), value_loss.detach()
@@ -506,6 +518,7 @@ class Trainer:
         self.model.train()
         if self._train_model is not self.model and hasattr(self._train_model, "train"):
             self._train_model.train()
+        _align_optimizer_state(self.optimizer)
 
         buf_len = len(replay_buffer)
         if buf_len < 2:
