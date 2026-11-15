@@ -2,6 +2,19 @@
 
 An AlphaZero-style AI for Connect Four trained entirely through self-play on a single GPU (or Apple Silicon MPS / CPU). Combines a Squeeze-and-Excitation ResNet with a 3-logit Win/Draw/Loss (WDL) value head and a Rayon-parallelized Rust MCTS-Solver engine (`alphafour_engine`).
 
+## Documentation
+
+Comprehensive educational guides (teaching AlphaZero from first principles through MCTS-Solver, WDL value networks, self-play, training, inference, exact solver verification, and the Rust bitboard engine) are available in [`docs/`](docs/README.md):
+
+- **[Documentation Hub & Learning Path](docs/README.md)**
+- **[01. AlphaZero from First Principles](docs/01-alphazero-fundamentals.md)**
+- **[02. Core Search Algorithm: MCTS, PUCT, FPU & Exact MCTS-Solver](docs/02-mcts-deep-dive.md)**
+- **[03. Neural Network Architecture, WDL Value Head & Fast Inference](docs/03-neural-network-and-inference.md)**
+- **[04. Self-Play Data Generation, Replay Buffer & Training Pipeline](docs/04-self-play-and-training.md)**
+- **[05. Verification, Exact Solver Metrics & Paired-Opening Arena](docs/05-evaluation-and-arena.md)**
+- **[06. High-Performance Rust Engine (`alphafour_engine`) & Exact Bitboard Solver](docs/06-rust-engine-and-architecture.md)**
+- **[07. Practical Guide, Hyperparameter Intuition & Reference](docs/07-practical-guide-and-reference.md)**
+
 ## Setup
 
 Requires Python 3.12+, a Rust toolchain (`cargo`), and [uv](https://docs.astral.sh/uv/):
@@ -149,6 +162,7 @@ Input (3×6×7) ─► Conv 3×3 (128) + BN + ReLU ─► 10 × SE-ResBlock (128
 ├── main.py                  # Self-play training entry point
 ├── play.py                  # Interactive Human vs AI console game
 ├── benchmark.py             # Dataset & Arena verification CLI
+├── docs/                    # AlphaZero educational guide & architecture docs
 ├── rust/                    # PyO3 + Rayon Rust engine (alphafour_engine)
 │   └── src/                 # Bitboard game, MCTS-Solver, batched self-play & solver
 ├── src/
@@ -158,6 +172,7 @@ Input (3×6×7) ─► Conv 3×3 (128) + BN + ReLU ─► 10 × SE-ResBlock (128
 │   ├── self_play.py         # Batched self-play orchestration
 │   ├── trainer.py           # Contiguous GPU ring buffer & BF16 WDL trainer
 │   ├── evaluate.py          # Solver-cached dataset metrics, isolated Arena & Anchor Elo
+│   ├── distributed.py       # Multi-GPU DDP runtime, sharding & collective sync
 │   └── utils.py             # Device selection, checkpoint & replay-buffer I/O
 ├── testdata/                # gamesolver.org benchmark positions (Test_L*_R*)
 └── tests/                   # Rust & Python unit test suites
