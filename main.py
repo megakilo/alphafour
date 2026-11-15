@@ -16,22 +16,44 @@ from __future__ import annotations
 import argparse
 import inspect
 import math
+import os
 import time
 from pathlib import Path
 from typing import Any
 
+# Partition Rayon CPU threads before importing `alphafour_engine` under `torchrun`
+_env_ws = int(os.environ.get("WORLD_SIZE", "1"))
+if _env_ws > 1:
+    os.environ.setdefault(
+        "RAYON_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // _env_ws))
+    )
+
 import numpy as np
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from tqdm import tqdm
 
 import src.utils as utils_mod
+from src.distributed import (
+    barrier,
+    broadcast_object,
+    cleanup_distributed,
+    configure_rayon_threads,
+    find_free_port,
+    gather_self_play_arrays,
+    get_comm_device,
+    init_distributed_process,
+    seed_rank,
+    shard_count,
+)
 from src.evaluate import (
     compute_elo_diff,
-    evaluate_dataset,
+    evaluate_dataset_distributed,
     evaluate_opening_move,
     get_dataset_child_wdl,
-    play_anchor_arena,
-    play_batched_arena,
+    play_anchor_arena_distributed,
+    play_batched_arena_distributed,
 )
 from src.model import AlphaZeroNet
 from src.self_play import run_self_play
@@ -146,6 +168,12 @@ def parse_args() -> argparse.Namespace:
         default=300_000,
         help="Replay buffer capacity (default: 300000)",
     )
+    parser.add_argument(
+        "--gpus",
+        type=int,
+        default=None,
+        help="Number of CUDA GPUs for DDP training (default: auto-detect all visible GPUs; 1 = single-GPU)",
+    )
 
     return parser.parse_args()
 
@@ -180,11 +208,13 @@ def _print_dataset_summary(
     model: AlphaZeroNet,
     device: torch.device,
     num_simulations: int,
+    is_main: bool = True,
 ) -> None:
     if not datasets:
         return
 
-    print(f"     Dataset Evaluation ({label}):")
+    if is_main:
+        print(f"     Dataset Evaluation ({label}):")
     total_n = 0
     weighted_acc = 0.0
     weighted_mse = 0.0
@@ -194,7 +224,7 @@ def _print_dataset_summary(
     weighted_opt_hits = 0.0
 
     for filename, lines, child_wdl in datasets:
-        res = evaluate_dataset(
+        res = evaluate_dataset_distributed(
             model,
             device,
             lines,
@@ -222,15 +252,16 @@ def _print_dataset_summary(
             total_opt_n += n_pos
             weighted_opt_hits += (opt_pct / 100.0) * n_pos
 
-        print(
-            f"       - {filename:<10}: "
-            f"wdl_acc={res['wdl_accuracy']:5.1f}%  "
-            f"draw_recall={_fmt_pct(draw_rec):>6}  "
-            f"mse={res['value_mse']:.3f}  "
-            f"opt_move={_fmt_pct(opt_pct):>6}"
-        )
+        if is_main:
+            print(
+                f"       - {filename:<10}: "
+                f"wdl_acc={res['wdl_accuracy']:5.1f}%  "
+                f"draw_recall={_fmt_pct(draw_rec):>6}  "
+                f"mse={res['value_mse']:.3f}  "
+                f"opt_move={_fmt_pct(opt_pct):>6}"
+            )
 
-    if total_n > 0:
+    if is_main and total_n > 0:
         overall_acc = weighted_acc / total_n
         overall_mse = weighted_mse / total_n
         overall_draw = (
@@ -250,25 +281,41 @@ def _print_dataset_summary(
         )
 
 
-def main() -> None:
-    args = parse_args()
-    device = get_device()
-    print("🎮 AlphaZero Connect Four Training")
-    print(f"   Device: {device}")
-    print(f"   Iterations: {args.iterations}")
-    print(f"   Games/iteration: {args.games_per_iteration}")
-    print(f"   Training simulations: {args.training_simulations}")
-    print(
-        f"   Eval simulations: {args.eval_simulations} (every {args.eval_interval} iters)"
-    )
-    print(
-        f"   Model: {args.res_blocks} res blocks, {args.filters} filters "
-        f"(compile={args.compile})"
-    )
-    print()
+def _run_training(
+    args: argparse.Namespace,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+) -> None:
+    is_main = rank == 0
+    rayon_threads = configure_rayon_threads(world_size)
+    base_seed = int(broadcast_object(int(time.time()) if is_main else 0, src=0))
+    seed_rank(base_seed, rank)
+
+    if is_main:
+        print("🎮 AlphaZero Connect Four Training")
+        if world_size > 1:
+            print(
+                f"   Device: {device} ({world_size} GPUs via DDP, Rayon={rayon_threads} threads/rank)"
+            )
+        else:
+            print(f"   Device: {device}")
+        print(f"   Iterations: {args.iterations}")
+        print(f"   Games/iteration: {args.games_per_iteration}")
+        print(f"   Training simulations: {args.training_simulations}")
+        print(
+            f"   Eval simulations: {args.eval_simulations} (every {args.eval_interval} iters)"
+        )
+        print(
+            f"   Model: {args.res_blocks} res blocks, {args.filters} filters "
+            f"(compile={args.compile})"
+        )
+        print()
 
     checkpoint_dir = Path(args.checkpoint_dir)
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    if is_main:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    barrier()
     replay_buffer_path = checkpoint_dir / "replay_buffer.pt"
 
     # Initialize model (with channels_last + dynamic torch.compile on CUDA when enabled)
@@ -278,9 +325,10 @@ def main() -> None:
     else:
         model.to(device)
     param_count = sum(p.numel() for p in model.parameters())
-    print(f"   Parameters: {param_count:,}")
+    if is_main:
+        print(f"   Parameters: {param_count:,}")
 
-    # Initialize trainer (with graceful signature detection for use_compile)
+    # Initialize trainer (with graceful signature detection for use_compile & distributed)
     trainer_params = inspect.signature(Trainer.__init__).parameters
     trainer_kwargs: dict[str, Any] = {
         "model": model,
@@ -291,6 +339,8 @@ def main() -> None:
     }
     if "use_compile" in trainer_params:
         trainer_kwargs["use_compile"] = args.compile
+    if "distributed" in trainer_params:
+        trainer_kwargs["distributed"] = world_size > 1
     trainer = Trainer(**trainer_kwargs)
 
     # Initialize replay buffer on target device when supported
@@ -303,34 +353,63 @@ def main() -> None:
     # Resume from checkpoint + separate replay_buffer.pt (or legacy inline buffer)
     start_iteration = 0
     if not args.no_resume:
-        latest = get_latest_checkpoint(checkpoint_dir)
-        if latest is not None:
-            print(f"   Resuming from: {latest}")
-            ckpt = load_checkpoint(latest, model, trainer.optimizer, device)
-            start_iteration = ckpt["iteration"]
-            if replay_buffer_path.exists():
+        latest_str: str | None = None
+        if is_main:
+            latest = get_latest_checkpoint(checkpoint_dir)
+            latest_str = str(latest) if latest is not None else None
+        latest_str = broadcast_object(latest_str, src=0)
+
+        if latest_str is not None:
+            latest_path = Path(latest_str)
+            if is_main:
+                print(f"   Resuming from: {latest_path}")
+            ckpt = load_checkpoint(latest_path, model, trainer.optimizer, device)
+            start_iteration = int(ckpt["iteration"])
+
+            rb_exists = bool(
+                broadcast_object(
+                    replay_buffer_path.exists() if is_main else False, src=0
+                )
+            )
+            if rb_exists:
                 buf_state = _load_replay_buffer_compat(replay_buffer_path)
                 replay_buffer.load_state(buf_state)
             elif "replay_buffer" in ckpt and ckpt["replay_buffer"] is not None:
                 replay_buffer.load_state(ckpt["replay_buffer"])
+
             trainer.restore_scheduler(
                 start_iteration, ckpt.get("scheduler_state_dict")
             )
-            print(
-                f"   Resumed at iteration {start_iteration}, buffer size: {len(replay_buffer)}"
-            )
-    print()
+            if is_main:
+                print(
+                    f"   Resumed at iteration {start_iteration}, buffer size: {len(replay_buffer)}"
+                )
+    if is_main:
+        print()
 
     # Preload evaluation datasets and cached solver ground-truth child W/D/L once
     datasets: list[tuple[str, list[str], np.ndarray | None]] = []
     testdata_dir = Path("testdata")
-    if testdata_dir.exists():
-        for file_path in sorted(testdata_dir.glob("Test_*")):
-            if file_path.is_file():
-                with open(file_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                child_wdl = get_dataset_child_wdl(lines)
-                datasets.append((file_path.name, lines, child_wdl))
+
+    def _load_testdata() -> list[tuple[str, list[str], np.ndarray | None]]:
+        loaded: list[tuple[str, list[str], np.ndarray | None]] = []
+        if testdata_dir.exists():
+            for file_path in sorted(testdata_dir.glob("Test_*")):
+                if file_path.is_file():
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    child_wdl = get_dataset_child_wdl(lines)
+                    loaded.append((file_path.name, lines, child_wdl))
+        return loaded
+
+    if world_size > 1:
+        if is_main:
+            datasets = _load_testdata()
+        barrier()
+        if not is_main:
+            datasets = _load_testdata()
+    else:
+        datasets = _load_testdata()
 
     sp_params = inspect.signature(run_self_play).parameters
     sp_supports_arrays = "return_arrays" in sp_params and hasattr(
@@ -343,13 +422,19 @@ def main() -> None:
         iter_start = time.time()
         iter_num = iteration + 1
         current_lr = trainer.optimizer.param_groups[0]["lr"]
-        print(f"━━━ Iteration {iter_num}/{args.iterations} (lr={current_lr:.6f}) ━━━")
+        if is_main:
+            print(f"━━━ Iteration {iter_num}/{args.iterations} (lr={current_lr:.6f}) ━━━")
 
         # ── Self-play phase ──
-        print(
-            f"  🎲 Self-play: {args.games_per_iteration} games, "
-            f"{args.training_simulations} sims/move ..."
-        )
+        local_games = shard_count(args.games_per_iteration, rank, world_size)
+        if is_main:
+            shard_note = (
+                f" (~{local_games}/GPU × {world_size})" if world_size > 1 else ""
+            )
+            print(
+                f"  🎲 Self-play: {args.games_per_iteration} games{shard_note}, "
+                f"{args.training_simulations} sims/move ..."
+            )
         model.eval()
 
         sp_start = time.time()
@@ -359,39 +444,87 @@ def main() -> None:
                 sp_kwargs["return_uint8"] = True
             states_arr, policies_arr, values_arr = run_self_play(
                 model=model,
-                num_games=args.games_per_iteration,
+                num_games=local_games,
                 num_simulations=args.training_simulations,
                 **sp_kwargs,
             )
-            replay_buffer.add_batch(states_arr, policies_arr, values_arr)
-            num_generated = len(states_arr)
+            if world_size > 1:
+                states_gathered, policies_gathered, values_gathered = (
+                    gather_self_play_arrays(
+                        states_arr, policies_arr, values_arr, device
+                    )
+                )
+                replay_buffer.add_batch(
+                    states_gathered, policies_gathered, values_gathered
+                )
+                num_generated = int(states_gathered.shape[0])
+            else:
+                replay_buffer.add_batch(states_arr, policies_arr, values_arr)
+                num_generated = len(states_arr)
         else:
             examples = run_self_play(
                 model=model,
-                num_games=args.games_per_iteration,
+                num_games=local_games,
                 num_simulations=args.training_simulations,
             )
-            replay_buffer.add(examples)
-            num_generated = len(examples)
+            if world_size > 1:
+                if examples:
+                    ex_states = np.stack([ex[0] for ex in examples], axis=0)
+                    ex_policies = np.stack([ex[1] for ex in examples], axis=0)
+                    ex_values = np.asarray([ex[2] for ex in examples], dtype=np.float32)
+                else:
+                    ex_states = np.empty((0, 3, 6, 7), dtype=np.float32)
+                    ex_policies = np.empty((0, 7), dtype=np.float32)
+                    ex_values = np.empty((0,), dtype=np.float32)
+                states_gathered, policies_gathered, values_gathered = (
+                    gather_self_play_arrays(
+                        ex_states, ex_policies, ex_values, device
+                    )
+                )
+                replay_buffer.add_batch(
+                    states_gathered, policies_gathered, values_gathered
+                )
+                num_generated = int(states_gathered.shape[0])
+            else:
+                replay_buffer.add(examples)
+                num_generated = len(examples)
         sp_time = time.time() - sp_start
 
-        print(
-            f"     Generated {num_generated} examples in {sp_time:.1f}s "
-            f"(buffer: {len(replay_buffer)})"
-        )
+        if is_main:
+            print(
+                f"     Generated {num_generated} examples in {sp_time:.1f}s "
+                f"(buffer: {len(replay_buffer)})"
+            )
 
         # ── Training phase ──
         num_epochs = 4 if iteration < 20 else args.epochs
-        effective_batches = args.batches_per_epoch or min(
-            500, max(1, len(replay_buffer) // args.batch_size)
-        )
-        print(f"  🧠 Training: {num_epochs} epochs × {effective_batches} batches ...")
+        if args.batches_per_epoch is not None:
+            effective_batches = args.batches_per_epoch
+        else:
+            single_gpu_batches = min(500, max(1, len(replay_buffer) // args.batch_size))
+            effective_batches = max(
+                1, (single_gpu_batches + world_size - 1) // world_size
+            )
+        if is_main:
+            ddp_note = (
+                f"/GPU (global batch={args.batch_size * world_size})"
+                if world_size > 1
+                else ""
+            )
+            print(
+                f"  🧠 Training: {num_epochs} epochs × {effective_batches} batches{ddp_note} ..."
+            )
         model.to(device)
 
         train_start = time.time()
         total_losses = {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
 
-        for _ in tqdm(range(num_epochs), desc="  Training", unit="epoch"):
+        for _ in tqdm(
+            range(num_epochs),
+            desc="  Training",
+            unit="epoch",
+            disable=not is_main,
+        ):
             losses = trainer.train_epoch(
                 replay_buffer, num_batches=effective_batches
             )
@@ -401,32 +534,35 @@ def main() -> None:
         train_time = time.time() - train_start
         avg_losses = {k: v / num_epochs for k, v in total_losses.items()}
 
-        print(
-            f"     Loss: policy={avg_losses['policy_loss']:.4f}, "
-            f"value={avg_losses['value_loss']:.4f}, "
-            f"total={avg_losses['total_loss']:.4f} "
-            f"({train_time:.1f}s)"
-        )
+        if is_main:
+            print(
+                f"     Loss: policy={avg_losses['policy_loss']:.4f}, "
+                f"value={avg_losses['value_loss']:.4f}, "
+                f"total={avg_losses['total_loss']:.4f} "
+                f"({train_time:.1f}s)"
+            )
 
         # Step LR scheduler
         trainer.step_scheduler()
 
         # ── Fast 0-sim Evaluation (every iteration) ──
-        print("  📊 Evaluation (0-sim raw network) ...")
-        best_move_0, center_pol_pct = evaluate_opening_move(
-            model, device, num_simulations=0
-        )
-        status_0 = "✅" if best_move_0 == 3 else "❌"
-        print(
-            f"     {status_0} Opening Move (0-sim): played column {best_move_0 + 1} "
-            f"(Center policy: {center_pol_pct:.1f}%)"
-        )
+        if is_main:
+            print("  📊 Evaluation (0-sim raw network) ...")
+            best_move_0, center_pol_pct = evaluate_opening_move(
+                model, device, num_simulations=0
+            )
+            status_0 = "✅" if best_move_0 == 3 else "❌"
+            print(
+                f"     {status_0} Opening Move (0-sim): played column {best_move_0 + 1} "
+                f"(Center policy: {center_pol_pct:.1f}%)"
+            )
         _print_dataset_summary(
             label="0-sim",
             datasets=datasets,
             model=model,
             device=device,
             num_simulations=0,
+            is_main=is_main,
         )
 
         # ── Periodic MCTS Evaluation + Paired-Opening Arena + Anchor Elo ──
@@ -435,33 +571,36 @@ def main() -> None:
             and (iter_num % args.eval_interval == 0 or iter_num == args.iterations)
         )
         if run_periodic and args.eval_simulations > 0:
-            print(
-                f"  🔍 MCTS Evaluation ({args.eval_simulations} sims/move) ..."
-            )
-            best_move_mcts, center_visit_pct = evaluate_opening_move(
-                model, device, num_simulations=args.eval_simulations
-            )
-            status_mcts = "✅" if best_move_mcts == 3 else "❌"
-            print(
-                f"     {status_mcts} Opening Move ({args.eval_simulations}-sim): "
-                f"played column {best_move_mcts + 1} "
-                f"(Center visits: {center_visit_pct:.1f}%)"
-            )
+            if is_main:
+                print(
+                    f"  🔍 MCTS Evaluation ({args.eval_simulations} sims/move) ..."
+                )
+                best_move_mcts, center_visit_pct = evaluate_opening_move(
+                    model, device, num_simulations=args.eval_simulations
+                )
+                status_mcts = "✅" if best_move_mcts == 3 else "❌"
+                print(
+                    f"     {status_mcts} Opening Move ({args.eval_simulations}-sim): "
+                    f"played column {best_move_mcts + 1} "
+                    f"(Center visits: {center_visit_pct:.1f}%)"
+                )
             _print_dataset_summary(
                 label=f"{args.eval_simulations}-sim MCTS",
                 datasets=datasets,
                 model=model,
                 device=device,
                 num_simulations=args.eval_simulations,
+                is_main=is_main,
             )
 
             # Anchor Elo vs fixed non-neural PureMCTSBaseline
             anchor_sims = min(200, args.eval_simulations)
-            print(
-                f"  ⚓ Anchor Arena: Current vs PureMCTSBaseline "
-                f"({args.arena_games} paired games, {args.eval_simulations} vs {anchor_sims} sims, temp=0) ..."
-            )
-            anchor_res = play_anchor_arena(
+            if is_main:
+                print(
+                    f"  ⚓ Anchor Arena: Current vs PureMCTSBaseline "
+                    f"({args.arena_games} paired games, {args.eval_simulations} vs {anchor_sims} sims, temp=0) ..."
+                )
+            anchor_res = play_anchor_arena_distributed(
                 model=model,
                 device=device,
                 num_games=args.arena_games,
@@ -469,19 +608,25 @@ def main() -> None:
                 anchor_simulations=anchor_sims,
                 paired_openings=True,
             )
-            print(
-                f"     Result: Current {anchor_res['model_wins']} - "
-                f"{anchor_res['anchor_wins']} Anchor (Draws: {anchor_res['draws']}) | "
-                f"Winrate: {anchor_res['win_rate_pct']:.1f}% | "
-                f"Anchor Elo: {anchor_res['elo_diff']:+.0f}"
-            )
+            if is_main:
+                print(
+                    f"     Result: Current {anchor_res['model_wins']} - "
+                    f"{anchor_res['anchor_wins']} Anchor (Draws: {anchor_res['draws']}) | "
+                    f"Winrate: {anchor_res['win_rate_pct']:.1f}% | "
+                    f"Anchor Elo: {anchor_res['elo_diff']:+.0f}"
+                )
 
             # Relative Checkpoint Arena (vs checkpoint from lookback iterations ago)
             arena_lookback = max(args.eval_interval, 10)
             if iter_num > arena_lookback:
                 opponent_iter = iter_num - arena_lookback
                 opponent_path = checkpoint_dir / f"checkpoint_{opponent_iter:04d}.pt"
-                if opponent_path.exists():
+                opp_exists = bool(
+                    broadcast_object(
+                        opponent_path.exists() if is_main else False, src=0
+                    )
+                )
+                if opp_exists:
                     opponent_model = AlphaZeroNet(args.res_blocks, args.filters)
                     if hasattr(opponent_model, "optimize_for_device"):
                         opponent_model.optimize_for_device(
@@ -489,15 +634,32 @@ def main() -> None:
                         )
                     else:
                         opponent_model.to(device)
+                    load_err: str | None = None
                     try:
                         load_checkpoint(opponent_path, opponent_model, device=device)
                         opponent_model.eval()
-                        print(
-                            f"  ⚔️ Arena: Current vs Iter-{opponent_iter} "
-                            f"({args.arena_games} paired games, {args.eval_simulations} sims, temp=0) ..."
+                    except Exception as e:
+                        load_err = str(e)
+
+                    local_ok = 1 if load_err is None else 0
+                    if world_size > 1:
+                        comm_dev = get_comm_device(device)
+                        ok_t = torch.tensor(
+                            [local_ok], dtype=torch.int64, device=comm_dev
                         )
+                        dist.all_reduce(ok_t, op=dist.ReduceOp.MIN)
+                        all_ok = int(ok_t.item()) == 1
+                    else:
+                        all_ok = local_ok == 1
+
+                    if all_ok:
+                        if is_main:
+                            print(
+                                f"  ⚔️ Arena: Current vs Iter-{opponent_iter} "
+                                f"({args.arena_games} paired games, {args.eval_simulations} sims, temp=0) ..."
+                            )
                         m1_w_p1, m1_w_p2, m2_w_p1, m2_w_p2, draws = (
-                            play_batched_arena(
+                            play_batched_arena_distributed(
                                 model1=model,
                                 model2=opponent_model,
                                 device=device,
@@ -507,57 +669,129 @@ def main() -> None:
                                 paired_openings=True,
                             )
                         )
-                        m1_wins = m1_w_p1 + m1_w_p2
-                        m2_wins = m2_w_p1 + m2_w_p2
-                        total_g = max(1, m1_wins + m2_wins + draws)
-                        win_rate_frac = (m1_wins + 0.5 * draws) / total_g
-                        rel_elo = compute_elo_diff(win_rate_frac)
+                        if is_main:
+                            m1_wins = m1_w_p1 + m1_w_p2
+                            m2_wins = m2_w_p1 + m2_w_p2
+                            total_g = max(1, m1_wins + m2_wins + draws)
+                            win_rate_frac = (m1_wins + 0.5 * draws) / total_g
+                            rel_elo = compute_elo_diff(win_rate_frac)
+                            print(
+                                f"     Result: Current {m1_wins} - {m2_wins} Iter-{opponent_iter} "
+                                f"(Draws: {draws})"
+                            )
+                            print(
+                                f"     Breakdown (Current): {m1_w_p1} wins as P1, {m1_w_p2} wins as P2"
+                            )
+                            print(
+                                f"     Breakdown (Iter-{opponent_iter}): "
+                                f"{m2_w_p1} wins as P1, {m2_w_p2} wins as P2"
+                            )
+                            print(
+                                f"     Current Winrate: {win_rate_frac * 100:.1f}% "
+                                f"(ΔElo: {rel_elo:+.0f})"
+                            )
+                    elif is_main:
                         print(
-                            f"     Result: Current {m1_wins} - {m2_wins} Iter-{opponent_iter} "
-                            f"(Draws: {draws})"
+                            f"  ⚔️ Arena: skipped (failed to load iter-{opponent_iter}: {load_err or 'worker error'})"
                         )
-                        print(
-                            f"     Breakdown (Current): {m1_w_p1} wins as P1, {m1_w_p2} wins as P2"
-                        )
-                        print(
-                            f"     Breakdown (Iter-{opponent_iter}): "
-                            f"{m2_w_p1} wins as P1, {m2_w_p2} wins as P2"
-                        )
-                        print(
-                            f"     Current Winrate: {win_rate_frac * 100:.1f}% "
-                            f"(ΔElo: {rel_elo:+.0f})"
-                        )
-                    except Exception as e:
-                        print(
-                            f"  ⚔️ Arena: skipped (failed to load iter-{opponent_iter}: {e})"
-                        )
-                else:
+                elif is_main:
                     print(
                         f"  ⚔️ Arena: skipped (no checkpoint for iter-{opponent_iter})"
                     )
 
         # ── Save lightweight checkpoint + separate overwritten replay_buffer.pt ──
         ckpt_path = checkpoint_dir / f"checkpoint_{iter_num:04d}.pt"
-        save_checkpoint(
-            model=model,
-            optimizer=trainer.optimizer,
-            iteration=iter_num,
-            replay_buffer=None,
-            path=ckpt_path,
-            scheduler=trainer.scheduler,
-        )
-        _save_replay_buffer_compat(replay_buffer.get_state(), replay_buffer_path)
+        if is_main:
+            save_checkpoint(
+                model=model,
+                optimizer=trainer.optimizer,
+                iteration=iter_num,
+                replay_buffer=None,
+                path=ckpt_path,
+                scheduler=trainer.scheduler,
+            )
+            _save_replay_buffer_compat(replay_buffer.get_state(), replay_buffer_path)
+        barrier()
 
         iter_time = time.time() - iter_start
-        print(
-            f"  💾 Saved: {ckpt_path} + {replay_buffer_path.name} ({iter_time:.1f}s total)"
-        )
-        print()
+        if is_main:
+            print(
+                f"  💾 Saved: {ckpt_path} + {replay_buffer_path.name} ({iter_time:.1f}s total)"
+            )
+            print()
 
-    print("✅ Training complete!")
-    print(
-        f"   Latest checkpoint: {checkpoint_dir / f'checkpoint_{args.iterations:04d}.pt'}"
+    if is_main:
+        print("✅ Training complete!")
+        print(
+            f"   Latest checkpoint: {checkpoint_dir / f'checkpoint_{args.iterations:04d}.pt'}"
+        )
+
+
+def _ddp_spawn_worker(
+    rank: int,
+    world_size: int,
+    master_port: int,
+    args: argparse.Namespace,
+) -> None:
+    """Worker entrypoint for multi-GPU `torch.multiprocessing.spawn` DDP runs."""
+    configure_rayon_threads(world_size)
+    device = init_distributed_process(
+        rank=rank,
+        world_size=world_size,
+        local_rank=rank,
+        master_addr="127.0.0.1",
+        master_port=master_port,
+        backend="nccl" if torch.cuda.is_available() else "gloo",
     )
+    try:
+        _run_training(args=args, rank=rank, world_size=world_size, device=device)
+    finally:
+        cleanup_distributed()
+
+
+def main() -> None:
+    args = parse_args()
+
+    # Standard `torchrun --nproc_per_node=... main.py` launch
+    env_world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if env_world_size > 1:
+        rank = int(os.environ["RANK"])
+        local_rank = int(os.environ.get("LOCAL_RANK", rank))
+        configure_rayon_threads(env_world_size)
+        device = init_distributed_process(
+            rank=rank,
+            world_size=env_world_size,
+            local_rank=local_rank,
+        )
+        try:
+            _run_training(
+                args=args, rank=rank, world_size=env_world_size, device=device
+            )
+        finally:
+            cleanup_distributed()
+        return
+
+    # Auto-detect multi-GPU DDP via `mp.spawn`, or fall back to single device
+    avail_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    if args.gpus is not None and args.gpus > 1 and avail_gpus < args.gpus:
+        raise ValueError(
+            f"Requested --gpus {args.gpus}, but only {avail_gpus} CUDA GPU(s) visible."
+        )
+
+    target_gpus = avail_gpus if (args.gpus is None or args.gpus <= 0) else args.gpus
+    if target_gpus >= 2:
+        configure_rayon_threads(target_gpus)
+        master_port = find_free_port()
+        mp.spawn(
+            _ddp_spawn_worker,
+            args=(target_gpus, master_port, args),
+            nprocs=target_gpus,
+            join=True,
+        )
+        return
+
+    device = torch.device("cuda:0") if (target_gpus == 1 and avail_gpus >= 1) else get_device()
+    _run_training(args=args, rank=0, world_size=1, device=device)
 
 
 if __name__ == "__main__":

@@ -19,20 +19,34 @@ def get_device() -> torch.device:
 
 
 def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
-    """Unwrap a torch.compile OptimizedModule (or nested wrapper) to its base nn.Module."""
-    while hasattr(model, "_orig_mod"):
-        model = getattr(model, "_orig_mod")
+    """Unwrap torch.compile / DDP / DataParallel wrappers (in any nesting order) to the base nn.Module."""
+    ddp_types = (
+        torch.nn.parallel.DistributedDataParallel,
+        torch.nn.DataParallel,
+    )
+    while True:
+        if hasattr(model, "_orig_mod"):
+            model = getattr(model, "_orig_mod")
+        elif isinstance(model, ddp_types):
+            model = model.module
+        else:
+            break
     return model
 
 
 def _clean_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
-    """Strip any '_orig_mod.' prefixes produced by torch.compile for clean compatibility."""
-    prefix = "_orig_mod."
+    """Strip any '_orig_mod.' and 'module.' prefixes produced by torch.compile or DDP."""
+    prefixes = ("_orig_mod.", "module.")
     cleaned: dict[str, Any] = {}
     for key, value in state_dict.items():
         clean_key = key
-        while clean_key.startswith(prefix):
-            clean_key = clean_key[len(prefix) :]
+        stripped = True
+        while stripped:
+            stripped = False
+            for prefix in prefixes:
+                if clean_key.startswith(prefix):
+                    clean_key = clean_key[len(prefix) :]
+                    stripped = True
         cleaned[clean_key] = value
     return cleaned
 

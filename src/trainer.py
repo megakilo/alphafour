@@ -8,9 +8,12 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
+from .distributed import get_comm_device, get_world_size, is_dist_initialized
 from .game import COLS, ROWS
 from .model import AlphaZeroNet
 from .utils import _align_optimizer_state
@@ -256,7 +259,7 @@ class _AlphaFourSequentialLR(SequentialLR):
 
 
 class Trainer:
-    """Single-GPU AlphaZero trainer with BF16 AMP, WDL loss, and warmup+cosine LR."""
+    """AlphaZero trainer (single-GPU or DDP) with BF16 AMP, WDL loss, and warmup+cosine LR."""
 
     def __init__(
         self,
@@ -267,6 +270,7 @@ class Trainer:
         batch_size: int = 256,
         total_iterations: int = 150,
         use_compile: bool = False,
+        distributed: bool | None = None,
     ) -> None:
         self.device = torch.device(device)
         self.model = model.to(self.device)
@@ -275,6 +279,16 @@ class Trainer:
         self.batch_size = batch_size
         self.lr = float(lr)
         self.total_iterations = max(1, int(total_iterations))
+
+        if distributed is None:
+            self.is_distributed = is_dist_initialized() and get_world_size() > 1
+        else:
+            if distributed and not is_dist_initialized():
+                raise RuntimeError(
+                    "Trainer(distributed=True) requires torch.distributed to be initialized."
+                )
+            self.is_distributed = bool(distributed)
+        self.world_size = get_world_size() if self.is_distributed else 1
 
         # Exclude 1D parameters (BatchNorm weights/biases and Linear biases) from weight decay
         decay_params = [
@@ -299,15 +313,39 @@ class Trainer:
             fused=use_fused,
         )
 
-        # Optional torch.compile on CUDA with safe fallback to eager execution
+        # Wrap unwrapped model in DistributedDataParallel when multi-GPU DDP is active
+        if self.is_distributed:
+            if self.device.type == "cuda":
+                ddp_idx = (
+                    self.device.index
+                    if self.device.index is not None
+                    else torch.cuda.current_device()
+                )
+                self._base_train_model: torch.nn.Module = DistributedDataParallel(
+                    self.model,
+                    device_ids=[ddp_idx],
+                    output_device=ddp_idx,
+                    broadcast_buffers=True,
+                    gradient_as_bucket_view=False,
+                )
+            else:
+                self._base_train_model = DistributedDataParallel(
+                    self.model,
+                    broadcast_buffers=True,
+                    gradient_as_bucket_view=False,
+                )
+        else:
+            self._base_train_model = self.model
+
+        # Optional torch.compile on CUDA with safe fallback to eager base/DDP module
         self.use_compile = bool(use_compile and self.device.type == "cuda")
-        self._train_model: torch.nn.Module = self.model
+        self._train_model: torch.nn.Module = self._base_train_model
         if self.use_compile:
             try:
-                self._train_model = torch.compile(self.model)
+                self._train_model = torch.compile(self._base_train_model)
             except Exception:
                 self.use_compile = False
-                self._train_model = self.model
+                self._train_model = self._base_train_model
 
         # Mixed precision configuration: BF16 preferred on modern CUDA, FP16+GradScaler fallback
         if self.device.type == "cuda":
@@ -516,7 +554,11 @@ class Trainer:
             Dict with 'policy_loss', 'value_loss', 'total_loss'.
         """
         self.model.train()
-        if self._train_model is not self.model and hasattr(self._train_model, "train"):
+        self._base_train_model.train()
+        if (
+            self._train_model is not self._base_train_model
+            and hasattr(self._train_model, "train")
+        ):
             self._train_model.train()
         _align_optimizer_state(self.optimizer)
 
@@ -557,16 +599,16 @@ class Trainer:
                     )
                 except Exception:
                     self.use_compile = False
-                    self._train_model = self.model
+                    self._train_model = self._base_train_model
                     p_loss, v_loss = self._run_batch_step(
-                        self.model,
+                        self._base_train_model,
                         states_t,
                         target_policies_t,
                         target_values_t,
                     )
             else:
                 p_loss, v_loss = self._run_batch_step(
-                    self.model,
+                    self._base_train_model,
                     states_t,
                     target_policies_t,
                     target_values_t,
@@ -579,10 +621,25 @@ class Trainer:
         if actual_batches == 0:
             return {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
 
-        # Single device-to-host synchronization at epoch end
-        avg_losses_cpu = (
-            torch.stack((total_policy_loss, total_value_loss)) / actual_batches
-        ).cpu()
+        loss_vec = torch.stack((total_policy_loss, total_value_loss))
+        if self.is_distributed:
+            comm_dev = get_comm_device(self.device)
+            # Keep BatchNorm running stats identical across ranks after the final step
+            for buf in self.model.buffers():
+                if buf.data.device == comm_dev:
+                    dist.broadcast(buf.data, src=0)
+                else:
+                    buf_comm = buf.data.to(comm_dev)
+                    dist.broadcast(buf_comm, src=0)
+                    buf.data.copy_(buf_comm)
+
+            loss_comm = loss_vec.to(comm_dev)
+            dist.all_reduce(loss_comm, op=dist.ReduceOp.SUM)
+            avg_losses_cpu = (loss_comm / (actual_batches * self.world_size)).cpu()
+        else:
+            # Single device-to-host synchronization at epoch end
+            avg_losses_cpu = (loss_vec / actual_batches).cpu()
+
         avg_policy = avg_losses_cpu[0].item()
         avg_value = avg_losses_cpu[1].item()
         return {

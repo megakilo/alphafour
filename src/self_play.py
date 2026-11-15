@@ -56,6 +56,15 @@ def _inference_context(device: torch.device) -> Iterator[None]:
             yield
 
 
+def _disable_tqdm() -> bool:
+    """Suppress progress bars on non-zero distributed ranks."""
+    return (
+        torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+        and torch.distributed.get_rank() != 0
+    )
+
+
 def _predict_packed_numpy(
     model: AlphaZeroNet,
     device: torch.device,
@@ -236,7 +245,12 @@ def _play_batched_rust(
     if hasattr(engine, "collect_continuous_u8") and hasattr(
         engine, "apply_continuous_packed"
     ):
-        pbar = tqdm(total=num_games, desc="    Self-play", unit="game")
+        pbar = tqdm(
+            total=num_games,
+            desc="    Self-play",
+            unit="game",
+            disable=_disable_tqdm(),
+        )
         while not engine.is_done():
             leaf_states_u8, leaf_valid, count, fin_collect = (
                 engine.collect_continuous_u8()
@@ -307,7 +321,12 @@ def _play_batched_rust(
     all_policies: list[np.ndarray] = []
     all_values: list[np.ndarray] = []
 
-    pbar = tqdm(total=num_games, desc="    Self-play", unit="game")
+    pbar = tqdm(
+        total=num_games,
+        desc="    Self-play",
+        unit="game",
+        disable=_disable_tqdm(),
+    )
 
     while not engine.is_done():
         prev_active = engine.num_active()
@@ -469,7 +488,12 @@ def _play_batched_python(
     out_policies: list[np.ndarray] = []
     out_values: list[float] = []
 
-    pbar = tqdm(total=num_games, desc="    Self-play", unit="game")
+    pbar = tqdm(
+        total=num_games,
+        desc="    Self-play",
+        unit="game",
+        disable=_disable_tqdm(),
+    )
     if len(active_indices) < num_games:
         pbar.update(num_games - len(active_indices))
 

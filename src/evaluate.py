@@ -12,7 +12,16 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
+from .distributed import (
+    barrier,
+    get_comm_device,
+    get_rank,
+    get_world_size,
+    is_dist_initialized,
+    shard_count,
+)
 from .game import COLS, ROWS, ConnectFour
 from .mcts import MCTSNode
 
@@ -730,54 +739,21 @@ def evaluate_opening_move(
     return best_move, center_pct
 
 
-def evaluate_dataset(
+def _predict_dataset_arrays(
     model: AlphaZeroNet,
     device: torch.device,
-    lines: list[str],
+    moves_list: list[str],
     num_simulations: int = 0,
-    child_wdl: np.ndarray | None = None,
     batch_size: int = 1024,
-) -> dict[str, Any]:
-    """Evaluate model policy and value quality against a gamesolver.org dataset.
-
-    Args:
-        model: Neural network (or compatible predictor) to evaluate.
-        device: Torch inference device.
-        lines: Strings of format `"<moves_str> <score>"`.
-        num_simulations: `0` for raw network evaluation, `>0` for batched MCTS.
-        child_wdl: Precomputed `int8[N, 7]` exact child W/D/L array; if `None`,
-            computed/loaded via `get_dataset_child_wdl(lines)`.
-        batch_size: Positions evaluated per batch.
-
-    Returns:
-        Dict with:
-            - `wdl_accuracy` (float): 3-class W/D/L accuracy (%).
-            - `accuracy` (float): Alias for `wdl_accuracy`.
-            - `win_recall` (float): Recall (%) on true Win positions (`nan` if 0).
-            - `draw_recall` (float): Recall (%) on true Draw positions (`nan` if 0).
-            - `loss_recall` (float): Recall (%) on true Loss positions (`nan` if 0).
-            - `value_mse` (float): MSE of predicted values vs `sign(true_score)`.
-            - `optimal_move_pct` (float | None): % choosing a W/D/L-optimal move.
-            - `blunder_pct` (float | None): % blundering on non-already-lost positions.
-    """
-    model.eval()
-    moves_list, true_scores = _parse_dataset_lines(lines)
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Run batched 0-sim or MCTS inference on `moves_list`, returning `(pred_wdl, pred_values, best_actions)`."""
     n = len(moves_list)
-
     if n == 0:
-        return {
-            "wdl_accuracy": 0.0,
-            "accuracy": 0.0,
-            "win_recall": float("nan"),
-            "draw_recall": float("nan"),
-            "loss_recall": float("nan"),
-            "value_mse": 0.0,
-            "optimal_move_pct": None,
-            "blunder_pct": None,
-        }
-
-    if child_wdl is None:
-        child_wdl = get_dataset_child_wdl(lines)
+        return (
+            np.empty((0,), dtype=np.int8),
+            np.empty((0,), dtype=np.float32),
+            np.empty((0,), dtype=np.int64),
+        )
 
     pred_values = np.empty(n, dtype=np.float32)
     best_actions = np.empty(n, dtype=np.int64)
@@ -831,8 +807,6 @@ def evaluate_dataset(
             best_actions[start:end] = chunk_actions
             pred_values[start:end] = chunk_values
 
-    true_wdl = np.sign(true_scores).astype(np.int8)
-
     if raw_wdl_classes is not None:
         pred_wdl = raw_wdl_classes
     else:
@@ -842,6 +816,67 @@ def evaluate_dataset(
             1,
             np.where(pred_values < -threshold, -1, 0),
         ).astype(np.int8)
+
+    return pred_wdl, pred_values, best_actions
+
+
+def evaluate_dataset(
+    model: AlphaZeroNet,
+    device: torch.device,
+    lines: list[str],
+    num_simulations: int = 0,
+    child_wdl: np.ndarray | None = None,
+    batch_size: int = 1024,
+) -> dict[str, Any]:
+    """Evaluate model policy and value quality against a gamesolver.org dataset.
+
+    Args:
+        model: Neural network (or compatible predictor) to evaluate.
+        device: Torch inference device.
+        lines: Strings of format `"<moves_str> <score>"`.
+        num_simulations: `0` for raw network evaluation, `>0` for batched MCTS.
+        child_wdl: Precomputed `int8[N, 7]` exact child W/D/L array; if `None`,
+            computed/loaded via `get_dataset_child_wdl(lines)`.
+        batch_size: Positions evaluated per batch.
+
+    Returns:
+        Dict with:
+            - `wdl_accuracy` (float): 3-class W/D/L accuracy (%).
+            - `accuracy` (float): Alias for `wdl_accuracy`.
+            - `win_recall` (float): Recall (%) on true Win positions (`nan` if 0).
+            - `draw_recall` (float): Recall (%) on true Draw positions (`nan` if 0).
+            - `loss_recall` (float): Recall (%) on true Loss positions (`nan` if 0).
+            - `value_mse` (float): MSE of predicted values vs `sign(true_score)`.
+            - `optimal_move_pct` (float | None): % choosing a W/D/L-optimal move.
+            - `blunder_pct` (float | None): % blundering on non-already-lost positions.
+    """
+    model.eval()
+    moves_list, true_scores = _parse_dataset_lines(lines)
+    n = len(moves_list)
+
+    if n == 0:
+        return {
+            "wdl_accuracy": 0.0,
+            "accuracy": 0.0,
+            "win_recall": float("nan"),
+            "draw_recall": float("nan"),
+            "loss_recall": float("nan"),
+            "value_mse": 0.0,
+            "optimal_move_pct": None,
+            "blunder_pct": None,
+        }
+
+    if child_wdl is None:
+        child_wdl = get_dataset_child_wdl(lines)
+
+    pred_wdl, pred_values, best_actions = _predict_dataset_arrays(
+        model=model,
+        device=device,
+        moves_list=moves_list,
+        num_simulations=num_simulations,
+        batch_size=batch_size,
+    )
+    true_wdl = np.sign(true_scores).astype(np.int8)
 
     wdl_accuracy = float(np.mean(pred_wdl == true_wdl) * 100.0)
 
@@ -872,6 +907,168 @@ def evaluate_dataset(
             )
         else:
             blunder_pct = float("nan")
+
+    return {
+        "wdl_accuracy": wdl_accuracy,
+        "accuracy": wdl_accuracy,
+        "win_recall": win_recall,
+        "draw_recall": draw_recall,
+        "loss_recall": loss_recall,
+        "value_mse": value_mse,
+        "optimal_move_pct": optimal_move_pct,
+        "blunder_pct": blunder_pct,
+    }
+
+
+def evaluate_dataset_distributed(
+    model: AlphaZeroNet,
+    device: torch.device,
+    lines: list[str],
+    num_simulations: int = 0,
+    child_wdl: np.ndarray | None = None,
+    batch_size: int = 1024,
+) -> dict[str, Any]:
+    """Shard `evaluate_dataset` across distributed ranks and `all_reduce` exact metrics."""
+    world_size = get_world_size()
+    if not is_dist_initialized() or world_size <= 1:
+        return evaluate_dataset(
+            model=model,
+            device=device,
+            lines=lines,
+            num_simulations=num_simulations,
+            child_wdl=child_wdl,
+            batch_size=batch_size,
+        )
+
+    model.eval()
+    rank = get_rank()
+    moves_list, true_scores = _parse_dataset_lines(lines)
+    n = len(moves_list)
+
+    if n == 0:
+        return {
+            "wdl_accuracy": 0.0,
+            "accuracy": 0.0,
+            "win_recall": float("nan"),
+            "draw_recall": float("nan"),
+            "loss_recall": float("nan"),
+            "value_mse": 0.0,
+            "optimal_move_pct": None,
+            "blunder_pct": None,
+        }
+
+    if child_wdl is None:
+        if rank == 0:
+            child_wdl = get_dataset_child_wdl(lines)
+        barrier()
+        if rank != 0:
+            child_wdl = get_dataset_child_wdl(lines)
+
+    has_cw = child_wdl is not None and child_wdl.shape == (n, COLS)
+    shard_moves = moves_list[rank::world_size]
+    shard_scores = true_scores[rank::world_size]
+    shard_cw = child_wdl[rank::world_size] if (has_cw and child_wdl is not None) else None
+
+    m = len(shard_moves)
+    pred_wdl, pred_values, best_actions = _predict_dataset_arrays(
+        model=model,
+        device=device,
+        moves_list=shard_moves,
+        num_simulations=num_simulations,
+        batch_size=batch_size,
+    )
+
+    if m > 0:
+        true_wdl = np.sign(shard_scores).astype(np.int8)
+        wdl_hits = float(np.sum(pred_wdl == true_wdl))
+        sum_sq_err = float(
+            np.sum((pred_values.astype(np.float64) - true_wdl.astype(np.float64)) ** 2)
+        )
+        win_mask = true_wdl == 1
+        draw_mask = true_wdl == 0
+        loss_mask = true_wdl == -1
+        n_win = float(np.sum(win_mask))
+        win_hits = float(np.sum(pred_wdl[win_mask] == 1)) if n_win > 0 else 0.0
+        n_draw = float(np.sum(draw_mask))
+        draw_hits = float(np.sum(pred_wdl[draw_mask] == 0)) if n_draw > 0 else 0.0
+        n_loss = float(np.sum(loss_mask))
+        loss_hits = float(np.sum(pred_wdl[loss_mask] == -1)) if n_loss > 0 else 0.0
+
+        if shard_cw is not None:
+            max_valid_wdl = shard_cw.max(axis=1)
+            chosen_wdl = shard_cw[np.arange(m), best_actions]
+            opt_hits = float(np.sum(chosen_wdl == max_valid_wdl))
+            non_lost = max_valid_wdl >= 0
+            n_non_lost = float(np.sum(non_lost))
+            blunder_hits = (
+                float(np.sum(chosen_wdl[non_lost] < max_valid_wdl[non_lost]))
+                if n_non_lost > 0
+                else 0.0
+            )
+        else:
+            opt_hits = 0.0
+            n_non_lost = 0.0
+            blunder_hits = 0.0
+    else:
+        wdl_hits = 0.0
+        sum_sq_err = 0.0
+        n_win = 0.0
+        win_hits = 0.0
+        n_draw = 0.0
+        draw_hits = 0.0
+        n_loss = 0.0
+        loss_hits = 0.0
+        opt_hits = 0.0
+        n_non_lost = 0.0
+        blunder_hits = 0.0
+
+    local_vec = [
+        float(m),
+        wdl_hits,
+        sum_sq_err,
+        n_win,
+        win_hits,
+        n_draw,
+        draw_hits,
+        n_loss,
+        loss_hits,
+        opt_hits,
+        n_non_lost,
+        blunder_hits,
+    ]
+    comm_dev = get_comm_device(device)
+    stats_t = torch.tensor(local_vec, dtype=torch.float64, device=comm_dev)
+    dist.all_reduce(stats_t, op=dist.ReduceOp.SUM)
+    (
+        g_n,
+        g_wdl_hits,
+        g_sum_sq_err,
+        g_n_win,
+        g_win_hits,
+        g_n_draw,
+        g_draw_hits,
+        g_n_loss,
+        g_loss_hits,
+        g_opt_hits,
+        g_n_non_lost,
+        g_blunder_hits,
+    ) = stats_t.cpu().tolist()
+
+    wdl_accuracy = (g_wdl_hits / g_n) * 100.0
+    win_recall = (g_win_hits / g_n_win) * 100.0 if g_n_win > 0 else float("nan")
+    draw_recall = (g_draw_hits / g_n_draw) * 100.0 if g_n_draw > 0 else float("nan")
+    loss_recall = (g_loss_hits / g_n_loss) * 100.0 if g_n_loss > 0 else float("nan")
+    value_mse = g_sum_sq_err / g_n
+
+    optimal_move_pct: float | None = None
+    blunder_pct: float | None = None
+    if has_cw:
+        optimal_move_pct = (g_opt_hits / g_n) * 100.0
+        blunder_pct = (
+            (g_blunder_hits / g_n_non_lost) * 100.0
+            if g_n_non_lost > 0
+            else float("nan")
+        )
 
     return {
         "wdl_accuracy": wdl_accuracy,
@@ -1284,6 +1481,80 @@ def compute_elo_diff(win_rate: float, eps: float = 1e-3) -> float:
     return 400.0 * math.log10(s / (1.0 - s))
 
 
+def play_batched_arena_distributed(
+    model1: Any,
+    model2: Any,
+    device: torch.device,
+    num_games: int = 40,
+    num_simulations: int = 800,
+    temperature_moves: int = 6,
+    temperature: float = 0.0,
+    paired_openings: bool = True,
+    seed: int = 42,
+    openings: list[str] | None = None,
+    num_simulations_m2: int | None = None,
+) -> tuple[int, int, int, int, int]:
+    """Shard Arena games across distributed ranks and `all_reduce` exact outcomes."""
+    world_size = get_world_size()
+    if not is_dist_initialized() or world_size <= 1:
+        return play_batched_arena(
+            model1=model1,
+            model2=model2,
+            device=device,
+            num_games=num_games,
+            num_simulations=num_simulations,
+            temperature_moves=temperature_moves,
+            temperature=temperature,
+            paired_openings=paired_openings,
+            seed=seed,
+            openings=openings,
+            num_simulations_m2=num_simulations_m2,
+        )
+
+    if num_games <= 0:
+        return 0, 0, 0, 0, 0
+
+    rank = get_rank()
+    num_pairs = num_games // 2
+
+    if paired_openings and num_pairs > 0:
+        all_openings = (
+            list(openings[:num_pairs])
+            if openings is not None and len(openings) >= num_pairs
+            else generate_paired_openings(num_pairs, seed=seed)
+        )
+        rank_openings = all_openings[rank::world_size]
+        extra_game = 1 if (num_games % 2 == 1 and rank == 0) else 0
+        rank_games = 2 * len(rank_openings) + extra_game
+        local_openings: list[str] | None = rank_openings
+    else:
+        rank_games = shard_count(num_games, rank, world_size)
+        local_openings = None
+
+    if rank_games > 0:
+        local_res = play_batched_arena(
+            model1=model1,
+            model2=model2,
+            device=device,
+            num_games=rank_games,
+            num_simulations=num_simulations,
+            temperature_moves=temperature_moves,
+            temperature=temperature,
+            paired_openings=paired_openings,
+            seed=seed + rank * 997,
+            openings=local_openings,
+            num_simulations_m2=num_simulations_m2,
+        )
+    else:
+        local_res = (0, 0, 0, 0, 0)
+
+    comm_dev = get_comm_device(device)
+    res_t = torch.tensor(local_res, dtype=torch.int64, device=comm_dev)
+    dist.all_reduce(res_t, op=dist.ReduceOp.SUM)
+    m1_p1, m1_p2, m2_p1, m2_p2, draws = (int(x) for x in res_t.cpu().tolist())
+    return m1_p1, m1_p2, m2_p1, m2_p2, draws
+
+
 def play_anchor_arena(
     model: Any,
     device: torch.device,
@@ -1300,6 +1571,60 @@ def play_anchor_arena(
     """
     anchor = PureMCTSBaseline(use_heuristic=True)
     m1_w_p1, m1_w_p2, m2_w_p1, m2_w_p2, draws = play_batched_arena(
+        model1=model,
+        model2=anchor,
+        device=device,
+        num_games=num_games,
+        num_simulations=num_simulations,
+        temperature=0.0,
+        paired_openings=paired_openings,
+        seed=seed,
+        num_simulations_m2=anchor_simulations,
+    )
+    model_wins = m1_w_p1 + m1_w_p2
+    anchor_wins = m2_w_p1 + m2_w_p2
+    total = model_wins + anchor_wins + draws
+    win_rate = (model_wins + 0.5 * draws) / total if total > 0 else 0.5
+    elo_diff = compute_elo_diff(win_rate)
+
+    return {
+        "model_wins": model_wins,
+        "model_wins_p1": m1_w_p1,
+        "model_wins_p2": m1_w_p2,
+        "anchor_wins": anchor_wins,
+        "anchor_wins_p1": m2_w_p1,
+        "anchor_wins_p2": m2_w_p2,
+        "draws": draws,
+        "win_rate": win_rate,
+        "win_rate_pct": win_rate * 100.0,
+        "elo_diff": elo_diff,
+    }
+
+
+def play_anchor_arena_distributed(
+    model: Any,
+    device: torch.device,
+    num_games: int = 40,
+    num_simulations: int = 400,
+    anchor_simulations: int = 200,
+    paired_openings: bool = True,
+    seed: int = 42,
+) -> dict[str, float | int]:
+    """Shard Anchor Arena games against `PureMCTSBaseline` across distributed ranks."""
+    world_size = get_world_size()
+    if not is_dist_initialized() or world_size <= 1:
+        return play_anchor_arena(
+            model=model,
+            device=device,
+            num_games=num_games,
+            num_simulations=num_simulations,
+            anchor_simulations=anchor_simulations,
+            paired_openings=paired_openings,
+            seed=seed,
+        )
+
+    anchor = PureMCTSBaseline(use_heuristic=True)
+    m1_w_p1, m1_w_p2, m2_w_p1, m2_w_p2, draws = play_batched_arena_distributed(
         model1=model,
         model2=anchor,
         device=device,

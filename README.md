@@ -15,8 +15,14 @@ uv sync
 ## Training
 
 ```bash
-# Train with defaults (resumes automatically if checkpoints/ exists)
+# Train with defaults (auto-uses all visible CUDA GPUs via DDP; resumes automatically if checkpoints/ exists)
 uv run main.py
+
+# Force single-GPU execution on a multi-GPU machine
+uv run main.py --gpus 1
+
+# Or launch explicitly with torchrun
+uv run torchrun --nproc_per_node=2 main.py
 
 # Custom training run
 uv run main.py --iterations 50 --games-per-iteration 500 --training-simulations 800 --eval-simulations 400
@@ -37,8 +43,9 @@ uv run main.py --no-resume
 | `--arena-games` | `40` | Number of duplicate paired-opening games per Arena / Anchor match |
 | `--epochs` | `2` | Training epochs per iteration (`4` during the first 20 iterations) |
 | `--batches-per-epoch` | auto (`<=500`) | Mini-batches per epoch (auto-scaled to buffer size, capped at 500) |
-| `--batch-size` | `256` | Training mini-batch size |
+| `--batch-size` | `256` | Per-GPU training mini-batch size (`global_batch = batch_size × GPUs`) |
 | `--lr` | `0.001` | Peak learning rate (linear warmup + single-cycle cosine decay to `1e-5`) |
+| `--gpus` | auto | Number of CUDA GPUs for DDP (`None`/`0` = auto-detect; `1` = single GPU) |
 | `--compile` / `--no-compile` | `--compile` | Enable `torch.compile` + `channels_last` on CUDA for self-play, eval, and training |
 | `--res-blocks` | `10` | Number of Squeeze-and-Excitation residual blocks |
 | `--filters` | `128` | Number of convolutional filters in the residual tower |
