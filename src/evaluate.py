@@ -24,6 +24,7 @@ from .distributed import (
 )
 from .game import COLS, ROWS, ConnectFour
 from .mcts import MCTSNode
+from .self_play import is_cython_compiled, run_batched_mcts
 
 if TYPE_CHECKING:
     from .model import AlphaZeroNet
@@ -501,6 +502,10 @@ def _run_python_batched_mcts(
             if getattr(ch, "solver_state", 0) == -1 or ch.game.get_result() == -1.0
         ]
         if winning_cols:
+            winning_set = set(winning_cols)
+            for col in root.children:
+                if col not in winning_set:
+                    visit_counts[i, col] = 0.0
             best_col = max(
                 winning_cols,
                 key=lambda c: (root.children[c].visit_count, root.children[c].prior, -c),
@@ -508,7 +513,7 @@ def _run_python_batched_mcts(
             best_actions[i] = best_col
             best_values[i] = 1.0
             if visit_counts[i].sum() == 0:
-                visit_counts[i, best_col] = 1.0
+                visit_counts[i, best_col] = float(max(1, num_simulations))
             continue
 
         # Avoid proven losing moves (child is SOLVER_WIN == +1 for opponent) unless all lose
@@ -517,11 +522,18 @@ def _run_python_batched_mcts(
             for col, ch in root.children.items()
             if getattr(ch, "solver_state", 0) != 1
         ]
+        if non_losing_cols:
+            non_losing_set = set(non_losing_cols)
+            for col in root.children:
+                if col not in non_losing_set:
+                    visit_counts[i, col] = 0.0
         candidates = non_losing_cols if non_losing_cols else list(root.children.keys())
         best_col = max(
             candidates,
             key=lambda c: (root.children[c].visit_count, root.children[c].prior, -c),
         )
+        if visit_counts[i].sum() == 0:
+            visit_counts[i, best_col] = 1.0
         best_child = root.children[best_col]
         best_actions[i] = best_col
 
@@ -556,9 +568,14 @@ def evaluate_opening_move(
     model.eval()
 
     if num_simulations > 0:
-        vc, best_actions, _ = _run_python_batched_mcts(
-            model, device, [ConnectFour()], num_simulations
-        )
+        if is_cython_compiled():
+            vc, best_actions, _ = run_batched_mcts(
+                model, device, [""], num_simulations
+            )
+        else:
+            vc, best_actions, _ = _run_python_batched_mcts(
+                model, device, [ConnectFour()], num_simulations
+            )
         counts = vc[0]
         best_move = int(best_actions[0])
         total = float(counts.sum())
@@ -635,10 +652,15 @@ def _predict_dataset_arrays(
             best_actions[start:end] = np.argmax(masked_pols, axis=1)
             pred_values[start:end] = vals_np
         else:
-            py_games = [_python_game_from_moves(m) for m in chunk_moves]
-            _, chunk_actions, chunk_values = _run_python_batched_mcts(
-                model, device, py_games, num_simulations
-            )
+            if is_cython_compiled():
+                _, chunk_actions, chunk_values = run_batched_mcts(
+                    model, device, chunk_moves, num_simulations
+                )
+            else:
+                py_games = [_python_game_from_moves(m) for m in chunk_moves]
+                _, chunk_actions, chunk_values = _run_python_batched_mcts(
+                    model, device, py_games, num_simulations
+                )
             best_actions[start:end] = chunk_actions
             pred_values[start:end] = chunk_values
 
@@ -997,6 +1019,11 @@ def _select_arena_actions_for_partition(
         pols_np = pols_t.float().cpu().numpy()
         return np.where(valid_np, pols_np, 0.0).astype(np.float32)
 
+    if is_cython_compiled():
+        vc, _, _ = run_batched_mcts(
+            model, device, partition_games, num_simulations
+        )
+        return vc
     vc, _, _ = _run_python_batched_mcts(model, device, partition_games, num_simulations)
     return vc
 

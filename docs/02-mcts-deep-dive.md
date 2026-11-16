@@ -34,7 +34,7 @@ Compare `MCTSNode` in [`src/mcts.py`](../src/mcts.py#L26-L72) and [`src/self_pla
 | `total_value` | $W(s)$ | **`s.current_player`** | Sum of backpropagated leaf evaluations from this node's mover's perspective |
 | `q_value` | $Q(s) = \frac{W(s)}{N(s)}$ | **`s.current_player`** | Mean expected outcome in $[-1, +1]$ for the player *about to move at this node* |
 | `is_expanded` | — | — | `True` once legal children have been instantiated with neural network priors |
-| `solver_state` | — | **`s.current_player`** | Exact game-theoretic proof status: `Ongoing`, `Win (+1)`, `Loss (-1)`, or `Draw (0)` |
+| `solver_state` | — | **`s.current_player`** | Exact game-theoretic proof status: `SOLVER_ONGOING (0)`, `SOLVER_WIN (+1)`, `SOLVER_LOSS (-1)`, or `SOLVER_DRAW (2)` |
 | `virtual_losses` | $N_{\text{vl}}(s)$ | — | *(Cython self-play)* In-flight parallel traversals currently evaluating a leaf under this node |
 
 > **Watch the Perspective of `q_value`!**
@@ -64,7 +64,7 @@ Starting from a root node $s_{\text{root}}$, `alphafour` runs `num_simulations` 
 
 ### Phase 1: Selection (The PUCT Formula)
 
-Starting at `node = root`, while `node` is already expanded, non-terminal, and not yet game-theoretically proven (`solver_state == Ongoing`), we repeatedly pick the child that maximizes the **PUCT (Predictor + Upper Confidence Bound applied to Trees)** score ([`src/mcts.py`](../src/mcts.py#L92-L130)):
+Starting at `node = root`, while `node` is already expanded, non-terminal, and not yet game-theoretically proven (`solver_state == SOLVER_ONGOING`), we repeatedly pick the child that maximizes the **PUCT (Predictor + Upper Confidence Bound applied to Trees)** score ([`src/mcts.py`](../src/mcts.py#L92-L130)):
 
 $$
 \text{UCB}(s, a) = \underbrace{U_{\text{exploit}}(s, a)}_{\text{How good is move } a\text{?}} + \underbrace{c_{\text{puct}} \cdot P(s, a) \cdot \frac{\sqrt{\max(1, N(s))}}{1 + N(s')}}_{\text{Exploration bonus}}
@@ -80,8 +80,8 @@ where $s'$ is the child node reached by playing column $a$ from parent $s$, $c_{
 ### Phase 2 & 3: Leaf Evaluation and Expansion
 
 Once selection stops at a leaf node $s_L$:
-1. **Already proven (`solver_state != Ongoing`)**: No neural network call needed! Immediately backpropagate the exact proven value (`+1.0`, `-1.0`, or `0.0`).
-2. **Terminal board (`game.get_result() is not None`)**: No neural network call needed! Mark `solver_state` (`ProvenLoss` if `result == -1.0`, `ProvenDraw` if `0.0`), propagate solver proofs upward, and backpropagate `result`.
+1. **Already proven (`solver_state != SOLVER_ONGOING`)**: No neural network call needed! Immediately backpropagate the exact proven value (`+1.0`, `-1.0`, or `0.0`).
+2. **Terminal board (`game.get_result() is not None`)**: No neural network call needed! Mark `solver_state` (`SOLVER_LOSS` if `result == -1.0`, `SOLVER_DRAW` if `0.0`), propagate solver proofs upward, and backpropagate `result`.
 3. **Unexpanded ongoing board**:
    - Run the neural network on $s_L$ with legal move mask: $(\mathbf{p}, v) = f_\theta(s_L)$.
    - Instantiate a child `MCTSNode` for each legal column $c$ with `prior = p[c]`. (Each child constructor immediately checks `child_game.get_result()`—so if any child is an instant 4-in-a-row win, that child is born with `SOLVER_LOSS`, and `_propagate_solver()` immediately marks $s_L$ as `SOLVER_WIN`!)
@@ -223,35 +223,35 @@ Standard MCTS only tracks statistical averages ($N$ and $Q$). In tactical games 
 
 ### 6.1 Exact Minimax Upward Propagation Rules
 
-Whenever a terminal child is created in `expand()` or reached during search, `_propagate_solver()` / `propagate_solver_up()` walks up parent pointers applying exact minimax logic over **all legal children** of an expanded node $p$:
+Whenever a terminal child is created in `expand()` or reached during search, `_propagate_solver()` / `_propagate_solver_up()` walks up parent pointers applying exact minimax logic over **all legal children** of an expanded node $p$:
 
 ```text
 Parent p (my turn)
- ├── Child c_0 (opponent's turn): ProvenWin (+1 for opp)  ──► Losing move for me
- ├── Child c_1 (opponent's turn): ProvenLoss (-1 for opp) ──► WINNING MOVE FOR ME!
- └── Child c_2 (opponent's turn): Ongoing
+ ├── Child c_0 (opponent's turn): SOLVER_WIN (+1 for opp)  ──► Losing move for me
+ ├── Child c_1 (opponent's turn): SOLVER_LOSS (-1 for opp) ──► WINNING MOVE FOR ME!
+ └── Child c_2 (opponent's turn): SOLVER_ONGOING (0)
 ```
 
-1. **Proven Win Rule (`∃ child == ProvenLoss`)**:
-   If **at least one** child is `ProvenLoss` for the opponent, then playing that move wins by force $\implies$ **`p.solver_state = ProvenWin`**! *(Notice we don't even need the remaining children to be solved!)*
-2. **Proven Loss Rule (`∀ children == ProvenWin`)**:
-   If $p$ is expanded (all legal moves exist) and **every** legal child is `ProvenWin` for the opponent, then every legal move loses $\implies$ **`p.solver_state = ProvenLoss`**!
-3. **Proven Draw Rule (`∀ children != Ongoing` and no `ProvenLoss`, at least one `ProvenDraw`)**:
-   If every legal child is solved (`ProvenWin` or `ProvenDraw`) and none is `ProvenLoss`, the best achievable outcome is a draw $\implies$ **`p.solver_state = ProvenDraw`**!
+1. **Proven Win Rule (`∃ child == SOLVER_LOSS`)**:
+   If **at least one** child is `SOLVER_LOSS` for the opponent, then playing that move wins by force $\implies$ **`p.solver_state = SOLVER_WIN`**! *(Notice we don't even need the remaining children to be solved!)*
+2. **Proven Loss Rule (`∀ children == SOLVER_WIN`)**:
+   If $p$ is expanded (all legal moves exist) and **every** legal child is `SOLVER_WIN` for the opponent, then every legal move loses $\implies$ **`p.solver_state = SOLVER_LOSS`**!
+3. **Proven Draw Rule (`∀ children != SOLVER_ONGOING` and no `SOLVER_LOSS`, at least one `SOLVER_DRAW`)**:
+   If every legal child is solved (`SOLVER_WIN` or `SOLVER_DRAW`) and none is `SOLVER_LOSS`, the best achievable outcome is a draw $\implies$ **`p.solver_state = SOLVER_DRAW`**!
 
-Propagation continues upward (`p = p.parent`) until a parent remains `Ongoing` or we reach the root!
+Propagation continues upward (`p = p.parent`) until a parent remains `SOLVER_ONGOING` or we reach the root!
 
 ### 6.2 How MCTS-Solver Transforms Search & Move Choice
 
-1. **Selection Priority (`select_child` / `best_child`)**:
-   - If any child is `ProvenLoss` (a proven winning move for the parent), **immediately select it**!
-   - Filter out any `ProvenWin` children (proven losing moves for the parent) so MCTS **never wastes another simulation** exploring a known losing move (unless *all* moves are `ProvenWin`).
+1. **Selection Priority (`select_child` / `_best_child`)**:
+   - If any child is `SOLVER_LOSS` (a proven winning move for the parent), **immediately select it**!
+   - Filter out any `SOLVER_WIN` children (proven losing moves for the parent) so MCTS **never wastes another simulation** exploring a known losing move (unless *all* moves are `SOLVER_WIN`).
 2. **Short-Circuiting Subtrees**:
-   - Selection stops immediately upon reaching any solved node (`solver_state != Ongoing`) and backpropagates its exact value (`+1.0`, `-1.0`, or `0.0`) with **zero GPU calls**.
-   - In `CythonBatchedSelfPlay` ([`src/self_play.py`](../src/self_play.py)), as soon as `root.solver_state != SOLVER_ONGOING`, that game slot marks `sims_done = num_simulations` and finishes its turn early!
+   - Selection stops immediately upon reaching any solved node (`solver_state != SOLVER_ONGOING`) and backpropagates its exact value (`+1.0`, `-1.0`, or `0.0`) with **zero GPU calls**.
+   - In `CythonBatchedSelfPlay` and `CythonBatchedMCTS` ([`src/self_play.py`](../src/self_play.py)), as soon as `root.solver_state != SOLVER_ONGOING`, that game slot marks `sims_done = num_simulations` and finishes its search early!
 3. **Blunder-Proof Root Visit Extraction**:
-   - If `root` is `ProvenWin`, non-winning moves are zeroed out so the agent *only* plays a proven winning column.
-   - If `root` is `Ongoing` or `ProvenDraw`, any move proven to lose (`child.solver_state == ProvenWin`) has its selection count zeroed out whenever at least one non-losing move exists.
+   - If `root` is `SOLVER_WIN`, non-winning moves are zeroed out so the agent *only* plays a proven winning column.
+   - If `root` is `SOLVER_ONGOING` or `SOLVER_DRAW`, any move proven to lose (`child.solver_state == SOLVER_WIN`) has its selection count zeroed out whenever at least one non-losing move exists.
 
 ---
 
@@ -275,7 +275,7 @@ $$
 > **Why pick `argmax(visit_counts)` instead of `argmax(-child.q_value)`?**
 > Visit count $N(s, a)$ is far more robust than raw $Q$: an under-explored child with $N = 1$ might have a lucky single-leaf evaluation of $+0.82$, whereas the true best move with $N = 520$ and $-Q = +0.79$ has survived hundreds of deep adversarial refutation attempts! (And thanks to MCTS-Solver, any proven win/loss overrides raw visits anyway.)
 
-### 7.2 Stateful Tree Reuse (`advance_move` & `rebase`)
+### 7.2 Stateful Tree Reuse (`advance_move` & `_rebase_tree`)
 
 Suppose MCTS runs 600 simulations at turn $t$, putting 350 visits into Column 4, and then plays Column 4. Those 350 simulations already built a 350-node search tree rooted at the board state *after* Column 4!
 
@@ -290,7 +290,7 @@ Throwing that subtree away on turn $t+1$ would waste $>50\%$ of the work we just
 1. **PUCT** balances exploitation ($-Q$) and neural-prior-weighted exploration ($c_{\text{puct}} P \frac{\sqrt{N}}{1+n}$), turning neural intuition into selective deep lookahead.
 2. **Parent-Relative FPU Reduction (`c_fpu = 0.20`)** prevents losing positions from wasting search budget on low-prior unvisited moves.
 3. **Dirichlet Root Noise ($\alpha = 0.35, \varepsilon = 0.25$)** ensures root diversity during self-play without corrupting internal tree nodes.
-4. **MCTS-Solver** propagates exact `ProvenWin` / `ProvenLoss` / `ProvenDraw` minimax proofs upward, making tactical mates exact and blunder-proof.
+4. **MCTS-Solver** propagates exact `SOLVER_WIN` / `SOLVER_LOSS` / `SOLVER_DRAW` minimax proofs upward, making tactical mates exact and blunder-proof.
 
 Next, let's examine the "student" side of the partnership: how `AlphaZeroNet` turns a $6 \times 7$ grid into policy priors and Win/Draw/Loss probabilities, and how inference is engineered to run at tens of thousands of positions per second on a GPU.
 

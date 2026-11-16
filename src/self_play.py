@@ -315,7 +315,7 @@ def _is_win_state(
     last_move: cython.schar,
     move_count: cython.uchar,
 ) -> cython.bint:
-    if last_move < 0 or move_count < 7:
+    if last_move < 0:
         return False
     if current_player == -1:
         return _has_won(bb_p1)
@@ -1318,6 +1318,30 @@ def _compute_root_policy_target(
         inv = 1.0 / cython.cast(cython.float, n_win if n_win > 0 else 1)
         for i in range(n_win):
             out_pol[win_cols[i]] = inv
+    elif nc > 0:
+        # Zero-simulation fallback on an expanded root: use masked root priors
+        has_safe_visits = False
+        for i in range(nc):
+            c_idx = fc + i
+            if nodes[c_idx].solver_state != 1 and nodes[c_idx].prior > 0.0:
+                has_safe_visits = True
+                break
+        total = 0.0
+        for i in range(nc):
+            c_idx = fc + i
+            if has_safe_visits and nodes[c_idx].solver_state == 1:
+                continue
+            col = cython.cast(cython.int, nodes[c_idx].last_move)
+            counts[col] = nodes[c_idx].prior
+            total += nodes[c_idx].prior
+        if total > 0.0:
+            for c in range(7):
+                out_pol[c] = counts[c] / total
+        else:
+            inv = 1.0 / cython.cast(cython.float, nc)
+            for i in range(nc):
+                col = cython.cast(cython.int, nodes[fc + i].last_move)
+                out_pol[col] = inv
     else:
         for c in range(7):
             if _col_height(slot[0].game_heights_packed, c) < 6:
@@ -2363,6 +2387,553 @@ class CythonBatchedSelfPlay:
 BatchedSelfPlay = CythonBatchedSelfPlay
 
 
+# ── Public Extension Class: CythonBatchedMCTS (Evaluation & Arena Search) ────
+
+
+@cython.cfunc
+@cython.exceptval(check=False)
+@cython.nogil
+def _update_eval_active_c(
+    slots: cython.pointer[SelfPlaySlot],
+    num_games: cython.int,
+    num_sims: cython.int,
+) -> cython.int:
+    """Refresh `active` flag on evaluation slots and return remaining active count."""
+    active: cython.int = 0
+    i: cython.int
+    slot: cython.pointer[SelfPlaySlot]
+    for i in range(num_games):
+        slot = cython.address(slots[i])
+        if slot[0].active == 0:
+            continue
+        if slot[0].nodes[0].solver_state != 0 or (
+            slot[0].nodes[0].is_expanded != 0 and slot[0].sims_done >= num_sims
+        ):
+            slot[0].active = 0
+            slot[0].sims_done = num_sims
+        else:
+            active += 1
+    return active
+
+
+@cython.cfunc
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.exceptval(check=False)
+@cython.nogil
+def _extract_eval_results_c(
+    slots: cython.pointer[SelfPlaySlot],
+    num_games: cython.int,
+    num_sims: cython.int,
+    visit_flat: cython.float[::1],
+    best_actions: cython.int[::1],
+    best_values: cython.float[::1],
+) -> cython.void:
+    """Extract solver-filtered `visit_counts`, `best_actions`, and undiluted `best_values`."""
+    i: cython.int
+    c: cython.int
+    j: cython.int
+    slot: cython.pointer[SelfPlaySlot]
+    nodes: cython.pointer[MCTSNode]
+    term_ss: cython.schar
+    nc: cython.int
+    fc: cython.int
+    c_idx: cython.int
+    col: cython.int
+    cs: cython.schar
+    n_win: cython.int
+    n_safe: cython.int
+    allow_losing: cython.bint
+    best_col: cython.int
+    best_c_idx: cython.int
+    best_vc: cython.int
+    best_prior: cython.float
+    first: cython.bint
+    vc_val: cython.int
+    pr_val: cython.float
+    row_base: cython.int
+    row_sum: cython.float
+    q_val: cython.double
+
+    for i in range(num_games):
+        row_base = i * 7
+        for c in range(7):
+            visit_flat[row_base + c] = 0.0
+
+        slot = cython.address(slots[i])
+        nodes = slot[0].nodes
+        term_ss = _terminal_solver_state(
+            slot[0].game_bb_p1,
+            slot[0].game_bb_p2,
+            slot[0].game_current_player,
+            slot[0].game_last_move,
+            slot[0].game_move_count,
+        )
+        nc = cython.cast(cython.int, nodes[0].num_children)
+        if term_ss != 0 or nc == 0:
+            best_actions[i] = 0
+            best_values[i] = -1.0 if term_ss == -1 else 0.0
+            continue
+
+        fc = nodes[0].first_child
+        n_win = 0
+        n_safe = 0
+        for j in range(nc):
+            cs = nodes[fc + j].solver_state
+            if cs == -1:
+                n_win += 1
+            if cs != 1:
+                n_safe += 1
+
+        if n_win > 0:
+            best_col = 0
+            best_vc = -1
+            best_prior = -1.0e30
+            first = True
+            row_sum = 0.0
+            for j in range(nc):
+                c_idx = fc + j
+                if nodes[c_idx].solver_state == -1:
+                    col = cython.cast(cython.int, nodes[c_idx].last_move)
+                    vc_val = nodes[c_idx].visit_count
+                    pr_val = nodes[c_idx].prior
+                    visit_flat[row_base + col] = (
+                        pr_val
+                        if num_sims == 0
+                        else cython.cast(cython.float, vc_val)
+                    )
+                    row_sum += visit_flat[row_base + col]
+                    if (
+                        first
+                        or vc_val > best_vc
+                        or (vc_val == best_vc and pr_val > best_prior)
+                    ):
+                        best_col = col
+                        best_vc = vc_val
+                        best_prior = pr_val
+                        first = False
+            if row_sum <= 0.0:
+                visit_flat[row_base + best_col] = cython.cast(
+                    cython.float, num_sims if num_sims > 0 else 1
+                )
+            best_actions[i] = best_col
+            best_values[i] = 1.0
+            continue
+
+        allow_losing = n_safe == 0
+        best_col = 0
+        best_c_idx = fc
+        best_vc = -1
+        best_prior = -1.0e30
+        first = True
+        row_sum = 0.0
+        for j in range(nc):
+            c_idx = fc + j
+            if (not allow_losing) and nodes[c_idx].solver_state == 1:
+                continue
+            col = cython.cast(cython.int, nodes[c_idx].last_move)
+            vc_val = nodes[c_idx].visit_count
+            pr_val = nodes[c_idx].prior
+            visit_flat[row_base + col] = (
+                pr_val if num_sims == 0 else cython.cast(cython.float, vc_val)
+            )
+            row_sum += visit_flat[row_base + col]
+            if (
+                first
+                or vc_val > best_vc
+                or (vc_val == best_vc and pr_val > best_prior)
+            ):
+                best_col = col
+                best_c_idx = c_idx
+                best_vc = vc_val
+                best_prior = pr_val
+                first = False
+
+        if row_sum <= 0.0:
+            visit_flat[row_base + best_col] = 1.0
+
+        best_actions[i] = best_col
+        cs = nodes[best_c_idx].solver_state
+        if cs == -1:
+            best_values[i] = 1.0
+        elif cs == 1:
+            best_values[i] = -1.0
+        elif cs == 2:
+            best_values[i] = 0.0
+        elif nodes[best_c_idx].visit_count > 0:
+            q_val = -nodes[best_c_idx].total_value / cython.cast(
+                cython.double, nodes[best_c_idx].visit_count
+            )
+            if q_val < -1.0:
+                q_val = -1.0
+            elif q_val > 1.0:
+                q_val = 1.0
+            best_values[i] = cython.cast(cython.float, q_val)
+        else:
+            best_values[i] = 0.0
+
+
+@cython.cfunc
+def _populate_slot_from_python_item(
+    slot: cython.pointer[SelfPlaySlot], item: object
+) -> cython.void:
+    """Load either a 1-indexed move string (`str`) or a `ConnectFour` object into `slot[0]`."""
+    slot[0].game_bb_p1 = 0
+    slot[0].game_bb_p2 = 0
+    slot[0].game_heights_packed = 0
+    slot[0].game_current_player = 1
+    slot[0].game_last_move = -1
+    slot[0].game_move_count = 0
+
+    if isinstance(item, str):
+        for ch in item:
+            if "1" <= ch <= "7":
+                col = ord(ch) - 49
+                if _col_height(slot[0].game_heights_packed, col) >= 6:
+                    raise ValueError(f"Invalid move in full column {col + 1}: {item!r}")
+                _slot_make_move(slot, col)
+        return
+
+    board = item.board
+    heights = item._heights
+    bb_p1: cython.ulonglong = 0
+    bb_p2: cython.ulonglong = 0
+    hp: cython.uint = 0
+    one64: cython.ulonglong = 1
+    c: int
+    r: int
+    h: int
+    p: int
+    for c in range(7):
+        h = int(heights[c])
+        hp = hp | (cython.cast(cython.uint, h & 0xF) << (c * 4))
+        for r in range(h):
+            p = int(board[r, c])
+            if p == 1:
+                bb_p1 = bb_p1 | (one64 << (c * 7 + r))
+            elif p == -1:
+                bb_p2 = bb_p2 | (one64 << (c * 7 + r))
+
+    slot[0].game_bb_p1 = bb_p1
+    slot[0].game_bb_p2 = bb_p2
+    slot[0].game_heights_packed = hp
+    slot[0].game_current_player = cython.cast(cython.schar, int(item.current_player))
+    slot[0].game_last_move = cython.cast(
+        cython.schar, -1 if item.last_move is None else int(item.last_move)
+    )
+    slot[0].game_move_count = cython.cast(cython.uchar, int(item._move_count))
+
+
+@cython.cclass
+class CythonBatchedMCTS:
+    """Noiseless OpenMP-parallel batched MCTS-Solver engine for evaluation and Arena."""
+
+    _c_slots: cython.pointer[SelfPlaySlot]
+    _py_slots: object
+    _num_slots_alloc: cython.int
+    _num_games: cython.int
+    _active_count: cython.int
+    _pending_count: cython.int
+    _num_simulations: cython.int
+    _c_puct: cython.double
+    _c_fpu: cython.double
+
+    def __cinit__(self) -> None:
+        if cython.compiled:
+            self._c_slots = cython.NULL
+            self._num_slots_alloc = 0
+
+    def __init__(
+        self,
+        games_or_moves: object,
+        num_simulations: int,
+        c_puct: float = 1.5,
+        c_fpu: float = DEFAULT_C_FPU,
+    ) -> None:
+        items = list(games_or_moves)
+        n_games: cython.int = len(items)
+        n_sims: cython.int = max(0, int(num_simulations))
+
+        self._num_games = n_games
+        self._active_count = 0
+        self._pending_count = 0
+        self._num_simulations = n_sims
+        self._c_puct = float(c_puct)
+        self._c_fpu = float(c_fpu)
+
+        if n_games == 0:
+            self._py_slots = []
+            return
+
+        init_cap: cython.int = max(64, min(n_sims * 6 + 32, 16384))
+        i: cython.int
+        slot: cython.pointer[SelfPlaySlot]
+        active: cython.int = 0
+
+        if cython.compiled:
+            self._c_slots = cython.cast(
+                cython.pointer[SelfPlaySlot],
+                stdlib.calloc(n_games, cython.sizeof(SelfPlaySlot)),
+            )
+            if self._c_slots == cython.NULL:
+                raise MemoryError("Failed to allocate SelfPlaySlot array")
+            self._num_slots_alloc = n_games
+            self._py_slots = None
+
+            for i in range(n_games):
+                slot = cython.address(self._c_slots[i])
+                slot[0].nodes = cython.cast(
+                    cython.pointer[MCTSNode],
+                    stdlib.malloc(init_cap * cython.sizeof(MCTSNode)),
+                )
+                if slot[0].nodes == cython.NULL:
+                    raise MemoryError("Failed to allocate MCTSNode arena")
+                slot[0].nodes_cap = init_cap
+                slot[0].scratch_nodes = cython.NULL
+                slot[0].scratch_cap = 0
+                slot[0].rebase_queue = cython.NULL
+                slot[0].rebase_queue_cap = 0
+                slot[0].rng_state = cython.cast(cython.ulonglong, i + 1)
+                slot[0].noise_applied = 1
+                slot[0].root_noisy = 0
+                slot[0].last_batch_leaves = 16
+                _populate_slot_from_python_item(slot, items[i])
+                _reset_tree_to_slot_game(slot)
+                if slot[0].nodes[0].solver_state != 0:
+                    slot[0].active = 0
+                    slot[0].sims_done = n_sims
+                else:
+                    slot[0].active = 1
+                    active += 1
+        else:
+            py_init_cap: int = max(16, min(int(n_sims) * 4 + 16, 128))
+            py_slots = [_new_py_slot(py_init_cap, idx + 1) for idx in range(n_games)]
+            for i in range(n_games):
+                slot = cython.address(py_slots[i])
+                slot[0].noise_applied = 1
+                slot[0].root_noisy = 0
+                _populate_slot_from_python_item(slot, items[i])
+                _reset_tree_to_slot_game(slot)
+                if slot[0].nodes[0].solver_state != 0:
+                    slot[0].active = 0
+                    slot[0].sims_done = n_sims
+                else:
+                    slot[0].active = 1
+                    active += 1
+            self._py_slots = py_slots
+
+        self._active_count = active
+
+    def __dealloc__(self) -> None:
+        i: cython.int
+        if cython.compiled:
+            if self._c_slots != cython.NULL:
+                for i in range(self._num_slots_alloc):
+                    if self._c_slots[i].nodes != cython.NULL:
+                        stdlib.free(self._c_slots[i].nodes)
+                        self._c_slots[i].nodes = cython.NULL
+                    if self._c_slots[i].scratch_nodes != cython.NULL:
+                        stdlib.free(self._c_slots[i].scratch_nodes)
+                        self._c_slots[i].scratch_nodes = cython.NULL
+                    if self._c_slots[i].rebase_queue != cython.NULL:
+                        stdlib.free(self._c_slots[i].rebase_queue)
+                        self._c_slots[i].rebase_queue = cython.NULL
+                stdlib.free(self._c_slots)
+                self._c_slots = cython.NULL
+                self._num_slots_alloc = 0
+
+    def is_done(self) -> bool:
+        """Return True when all evaluation positions have finished search or proven their root."""
+        return self._active_count == 0 and self._pending_count == 0
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    def collect_leaves_u8(self) -> tuple[np.ndarray, np.ndarray, int]:
+        """Collect next batch of roots/leaves across unfinished slots as `(uint8[K,3,6,7], bool[K,7], K)`."""
+        if self._active_count == 0:
+            self._pending_count = 0
+            return (
+                np.empty((0, 3, 6, 7), dtype=np.uint8),
+                np.empty((0, 7), dtype=np.bool_),
+                0,
+            )
+
+        n_games: cython.int = self._num_games
+        num_sims: cython.int = self._num_simulations
+        c_puct: cython.double = self._c_puct
+        c_fpu: cython.double = self._c_fpu
+        active_local: cython.int = self._active_count
+        total_count: cython.int = 0
+        guard_limit: cython.int = num_sims + 8
+        guard: cython.int
+
+        if self._pending_count > 0:
+            if cython.compiled:
+                with cython.nogil:
+                    _revert_all_pending_c(self._c_slots, n_games)
+            else:
+                _revert_all_pending_c(self._py_slots, n_games)
+            self._pending_count = 0
+
+        if cython.compiled:
+            with cython.nogil:
+                for guard in range(guard_limit):
+                    active_local = _update_eval_active_c(
+                        self._c_slots, n_games, num_sims
+                    )
+                    if active_local == 0:
+                        total_count = 0
+                        break
+                    total_count = _select_all_slots_c(
+                        self._c_slots,
+                        n_games,
+                        active_local,
+                        num_sims,
+                        c_puct,
+                        c_fpu,
+                        0.0,
+                        0.0,
+                    )
+                    if total_count > 0:
+                        break
+        else:
+            for guard in range(guard_limit):
+                active_local = _update_eval_active_c(self._py_slots, n_games, num_sims)
+                if active_local == 0:
+                    total_count = 0
+                    break
+                total_count = _select_all_slots_c(
+                    self._py_slots,
+                    n_games,
+                    active_local,
+                    num_sims,
+                    c_puct,
+                    c_fpu,
+                    0.0,
+                    0.0,
+                )
+                if total_count > 0:
+                    break
+
+        self._active_count = active_local
+        if total_count == 0:
+            self._pending_count = 0
+            return (
+                np.empty((0, 3, 6, 7), dtype=np.uint8),
+                np.empty((0, 7), dtype=np.bool_),
+                0,
+            )
+
+        states_arr = np.empty((total_count, 3, 6, 7), dtype=np.uint8)
+        valid_u8 = np.empty((total_count, 7), dtype=np.uint8)
+        states_flat: cython.uchar[::1] = states_arr.reshape(-1)
+        valid_flat: cython.uchar[::1] = valid_u8.reshape(-1)
+
+        if cython.compiled:
+            with cython.nogil:
+                _encode_all_pending_c(
+                    self._c_slots, n_games, total_count, states_flat, valid_flat
+                )
+        else:
+            _encode_all_pending_c(
+                self._py_slots, n_games, total_count, states_flat, valid_flat
+            )
+
+        self._pending_count = total_count
+        return states_arr, valid_u8.view(np.bool_), int(total_count)
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    def apply_evaluations_packed(self, evals_packed: np.ndarray) -> None:
+        """Apply packed `float32[K, 8]` evaluations (`[policy_0..6, value]`) to pending nodes."""
+        if self._pending_count == 0:
+            return
+
+        if (
+            not isinstance(evals_packed, np.ndarray)
+            or evals_packed.dtype != np.float32
+            or not evals_packed.flags["C_CONTIGUOUS"]
+        ):
+            evals_packed = np.ascontiguousarray(evals_packed, dtype=np.float32)
+
+        flat_arr = evals_packed.reshape(-1)
+        expected_len: int = int(self._pending_count) * 8
+        if int(flat_arr.shape[0]) < expected_len:
+            raise ValueError(
+                f"Packed evaluation shape mismatch: pending={self._pending_count}, "
+                f"expected_len={expected_len}, got={flat_arr.shape[0]}"
+            )
+
+        evals_flat: cython.float[::1] = flat_arr
+        n_games: cython.int = self._num_games
+        active_local: cython.int = self._active_count
+        num_sims: cython.int = self._num_simulations
+
+        if cython.compiled:
+            with cython.nogil:
+                _apply_all_packed_c(
+                    self._c_slots,
+                    n_games,
+                    active_local,
+                    evals_flat,
+                    num_sims,
+                    0.0,
+                    0.0,
+                )
+                active_local = _update_eval_active_c(self._c_slots, n_games, num_sims)
+        else:
+            _apply_all_packed_c(
+                self._py_slots,
+                n_games,
+                active_local,
+                evals_flat,
+                num_sims,
+                0.0,
+                0.0,
+            )
+            active_local = _update_eval_active_c(self._py_slots, n_games, num_sims)
+
+        self._pending_count = 0
+        self._active_count = active_local
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    def get_results(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return `(visit_counts[N, 7], best_actions[N], best_values[N])`."""
+        n: cython.int = self._num_games
+        if n == 0:
+            return (
+                np.zeros((0, 7), dtype=np.float32),
+                np.zeros((0,), dtype=np.int64),
+                np.zeros((0,), dtype=np.float32),
+            )
+
+        visits = np.zeros((n, 7), dtype=np.float32)
+        actions_i32 = np.zeros((n,), dtype=np.int32)
+        values = np.zeros((n,), dtype=np.float32)
+
+        visit_flat: cython.float[::1] = visits.reshape(-1)
+        actions_mv: cython.int[::1] = actions_i32
+        values_mv: cython.float[::1] = values
+        num_sims: cython.int = self._num_simulations
+
+        if cython.compiled:
+            with cython.nogil:
+                _extract_eval_results_c(
+                    self._c_slots, n, num_sims, visit_flat, actions_mv, values_mv
+                )
+        else:
+            _extract_eval_results_c(
+                self._py_slots, n, num_sims, visit_flat, actions_mv, values_mv
+            )
+
+        return visits, actions_i32.astype(np.int64), values
+
+
+BatchedMCTS = CythonBatchedMCTS
+
+
 # ── High-Level PyTorch + Batched MCTS Self-Play Orchestration ────────────────
 
 
@@ -2586,4 +3157,45 @@ def run_self_play(
         return_arrays=return_arrays,
         return_uint8=return_uint8,
     )
+
+
+def run_batched_mcts(
+    model: object,
+    device: object,
+    games_or_moves: object,
+    num_simulations: int,
+    c_puct: float = 1.5,
+    c_fpu: float = DEFAULT_C_FPU,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Run noiseless batched MCTS-Solver (`CythonBatchedMCTS`) exclusively with `model`.
+
+    Returns `(visit_counts[N, 7], best_actions[N], best_values[N])` with solver-filtered
+    visit counts and undiluted `-best_child.q_value` values.
+    """
+    items = games_or_moves if isinstance(games_or_moves, list) else list(games_or_moves)
+    if len(items) == 0:
+        return (
+            np.zeros((0, COLS), dtype=np.float32),
+            np.zeros((0,), dtype=np.int64),
+            np.zeros((0,), dtype=np.float32),
+        )
+
+    if hasattr(model, "eval"):
+        model.eval()
+
+    engine = CythonBatchedMCTS(items, num_simulations, c_puct, c_fpu)
+    zero_steps: int = 0
+    max_zero_steps: int = max(8, int(num_simulations) + 4)
+    while not engine.is_done():
+        leaf_states_u8, leaf_valid, count = engine.collect_leaves_u8()
+        if count > 0:
+            zero_steps = 0
+            packed_np = _predict_packed_numpy(model, device, leaf_states_u8, leaf_valid)
+            engine.apply_evaluations_packed(packed_np)
+        else:
+            zero_steps += 1
+            if zero_steps > max_zero_steps:
+                break
+
+    return engine.get_results()
 

@@ -17,7 +17,7 @@ Yet if you run MCTS using standard Python objects, **your GPU will sit 95% idle*
 
 `alphafour` solves this using **Cython Pure Python Mode** in [`src/self_play.py`](../src/self_play.py):
 1. **Single Valid `.py` Source File**: Uses `import cython`, `@cython.cfunc`, `@cython.cclass`, `cython.struct`, and `cython.nogil` + `cython.parallel.prange` — zero `.pyx` or `.pxd` files! When uncompiled (`is_cython_compiled() == False`), `src/self_play.py` executes cleanly as 100%-valid Pure Python; when compiled via `setup_cython.py`, it compiles to a single `-O3 -march=native -fopenmp` C translation unit (`is_cython_compiled() == True`).
-2. **PyTorch GPU Inference & Training (`src/model.py`, `src/trainer.py`)**: Pairs `CythonBatchedSelfPlay` with `AlphaZeroNet.predict_packed` (`uint8[B, 3, 6, 7]` H2D + `float32[B, 8]` D2H), `channels_last` BF16 mixed precision, and dynamic `torch.compile`.
+2. **PyTorch GPU Inference & Training (`src/model.py`, `src/trainer.py`)**: Pairs `CythonBatchedSelfPlay` (and `CythonBatchedMCTS` for evaluation/Arena search) with `AlphaZeroNet.predict_packed` (`uint8[B, 3, 6, 7]` H2D + `float32[B, 8]` D2H), `channels_last` BF16 mixed precision, and dynamic `torch.compile`.
 
 ---
 

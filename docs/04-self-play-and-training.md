@@ -67,20 +67,20 @@ Look at how `_sample_opening_into_slot` ([`src/self_play.py`](../src/self_play.p
 > Think about what happens after ply 10 when $\tau = 0$: `action_probs` becomes a **hard one-hot vector** `[0, 0, 1, 0, 0, 0, 0]`!
 > Suppose Column 3 had `305` visits and Column 4 had `295` visits because both moves are nearly equally strong. Training against one-hot `[0, 0, 1, 0, 0, 0, 0]` forces the network to crush Column 4's probability toward `0.0`—throwing away rich dark knowledge from 600 MCTS simulations!
 
-In `alphafour` (`_advance_single_slot` in [`src/self_play.py`](../src/self_play.py)), **the training policy target $\boldsymbol{\pi}_t$ is completely decoupled from move selection**:
+In `alphafour` (`_compute_root_policy_target` in [`src/self_play.py`](../src/self_play.py)), **the training policy target $\boldsymbol{\pi}_t$ is completely decoupled from move selection**:
 1. If `root` is `SOLVER_WIN`, $\boldsymbol{\pi}_t$ is **uniform over all proven-winning columns** (`child == SOLVER_LOSS`).
-2. Otherwise, any proven-losing moves (`child == ProvenWin`) are zeroed out into $N_{\text{safe}}$ (when a safe visited move exists), and $\boldsymbol{\pi}_t$ is **always the smooth normalized visit distribution**:
+2. Otherwise, any proven-losing moves (`child == SOLVER_WIN`) are zeroed out into $N_{\text{safe}}$ (when a safe visited move exists), and $\boldsymbol{\pi}_t$ is **always the smooth normalized visit distribution**:
 
    $$
    \pi_t(a) = \frac{N_{\text{safe}}(s_t, a)}{\sum_{b=0}^6 N_{\text{safe}}(s_t, b)}
    $$
 
-   even on ply 30 when the actual move played on the board is chosen greedily via `argmax`! *(In the pure-Python fallback `_play_batched_python`, `policy_target` normalizes raw `visit_counts` directly while `selection_counts` applies the `SOLVER_WIN` / `SOLVER_LOSS` zeroing before sampling the move.)*
+   even on ply 30 when the actual move played on the board is chosen greedily via `argmax`! *(Because `src/self_play.py` uses Cython Pure Python Mode, both compiled native C execution and uncompiled pure-Python fallback run the exact same `_compute_root_policy_target` implementation.)*
 
 ### 2.4 Free $2\times$ Data via Horizontal Mirror Symmetry
 Connect Four rules are invariant under left-right reflection (`col c` $\leftrightarrow$ `col 6 - c`). Neither player parity nor gravity changes when you flip the board horizontally!
 
-Therefore, for **every** recorded state $(s_t, \boldsymbol{\pi}_t, z_t)$ in a finished game, `_emit_slot_examples_c` and `augment_arrays` ([`src/self_play.py`](../src/self_play.py)) emit **two** examples:
+Therefore, for **every** recorded state $(s_t, \boldsymbol{\pi}_t, z_t)$ in a finished game, `_emit_mirrored_game_u8` and `augment_arrays` ([`src/self_play.py`](../src/self_play.py)) emit **two** examples:
 1. Original: `(s_t, π_t, z_t)`
 2. Mirrored: `(s_t[:, :, ::-1], π_t[::-1], z_t)`
 

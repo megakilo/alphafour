@@ -35,8 +35,8 @@ uv run main.py
 # Force single-GPU execution on a multi-GPU machine
 uv run main.py --gpus 1
 
-# Or launch explicitly with torchrun
-OMP_NUM_THREADS=1 uv run torchrun --standalone --nproc_per_node=2 main.py
+# Or launch explicitly with torchrun (partition CPU OpenMP threads across ranks)
+OMP_NUM_THREADS=$(( $(nproc) / 2 )) uv run torchrun --standalone --nproc_per_node=2 main.py
 
 # Custom training run
 uv run main.py --iterations 50 --games-per-iteration 500 --training-simulations 800 --eval-simulations 400
@@ -154,7 +154,7 @@ Input (3×6×7) ─► Conv 3×3 (128) + BN + ReLU ─► 10 × SE-ResBlock (128
                                                                                └─► V = P(Win) - P(Loss) ∈ [-1, +1]
 ```
 
-- **Cython Self-Play Engine (`src/self_play.py`)**: Written in Cython Pure Python Mode and parallelized across CPU cores with `nogil` + OpenMP `prange` (`CythonBatchedSelfPlay`), featuring barrier-free continuous self-play batching (`uint8` states + packed `float32[B, 8]` policy/value outputs), flat C-struct MCTS arenas with double-buffered subtree rebasing, collision-aborted virtual-loss leaf batching, exact **MCTS-Solver** (`SOLVER_WIN` / `SOLVER_LOSS` / `SOLVER_DRAW` propagation), **First Play Urgency (FPU)** reduction (`c_fpu = 0.20`), `dirichlet_alpha = 0.35`, stochastic 0–4 ply opening diversification, and normalized visit-count policy targets decoupled from move selection temperature (`TEMP_THRESHOLD = 10`).
+- **Cython Self-Play & Batched MCTS Engine (`src/self_play.py`)**: Written in Cython Pure Python Mode and parallelized across CPU cores with `nogil` + OpenMP `prange` (`CythonBatchedSelfPlay` and `CythonBatchedMCTS`), featuring barrier-free continuous self-play batching (`uint8` states + packed `float32[B, 8]` policy/value outputs), flat C-struct MCTS arenas with double-buffered subtree rebasing, collision-aborted virtual-loss leaf batching, exact **MCTS-Solver** (`SOLVER_WIN` / `SOLVER_LOSS` / `SOLVER_DRAW` propagation), **First Play Urgency (FPU)** reduction (`c_fpu = 0.20`), `dirichlet_alpha = 0.35`, stochastic 0–4 ply opening diversification, and normalized visit-count policy targets decoupled from move selection temperature (`TEMP_THRESHOLD = 10`).
 - **Single-GPU & Multi-GPU Training & Inference**: `channels_last` (`NHWC`) memory layout + dynamic `torch.compile` + `bfloat16` mixed precision on CUDA across self-play, evaluation, and training; preallocated `uint8` ring-buffer `ReplayBuffer` (`300K` states in ~47 MB) with O(B) analytical inverse-CDF 2:1 linear recency sampling; decoupled `AdamW` weight decay (excluding BatchNorm and bias parameters); horizontal board-mirroring data augmentation; and linear warmup + single-cycle cosine LR schedule.
 
 ## Project Structure

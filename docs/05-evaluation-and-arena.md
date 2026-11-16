@@ -57,7 +57,7 @@ The 6 files partition positions by **how many stones have already been played** 
 
 ## 3. Dataset Verification Metrics (`evaluate_dataset`)
 
-When `main.py` or `uv run benchmark.py` runs `evaluate_dataset` ([`src/evaluate.py`](../src/evaluate.py#L823-L920)), it evaluates **both `0`-simulation raw network intuition** and **`400`-simulation MCTS search** across the datasets:
+When `main.py` or `uv run benchmark.py` runs `evaluate_dataset` ([`src/evaluate.py`](../src/evaluate.py#L680-L777)), it evaluates **both `0`-simulation raw network intuition** and **`400`-simulation MCTS search** across the datasets:
 
 ### 3.1 Opening Move Sanity Check (`evaluate_opening_move`)
 Tests the empty board (`""`):
@@ -66,8 +66,8 @@ Tests the empty board (`""`):
 
 ### 3.2 3-Class WDL Accuracy & Per-Class Recall (`Win`, `Draw`, `Loss`)
 Compares predicted outcome $\hat{y}_i \in \{-1, 0, +1\}$ against `true_wdl = sign(true_score)`:
-- **At `0` simulations (Raw Network)**: Uses the WDL head's most probable class directly (`argmax([P(Loss), P(Draw), P(Win)]) - 1` in [`src/evaluate.py`](../src/evaluate.py#L780-L786)).
-- **At `>0` simulations (MCTS Search)**: Classifies the MCTS best-move value $\hat{v}_i \in [-1, +1]$ using symmetric $\pm \frac{1}{3}$ thresholds ([`src/evaluate.py`](../src/evaluate.py#L813-L818)):
+- **At `0` simulations (Raw Network)**: Uses the WDL head's most probable class directly (`argmax([P(Loss), P(Draw), P(Win)]) - 1` in [`src/evaluate.py`](../src/evaluate.py#L642-L645)).
+- **At `>0` simulations (MCTS Search)**: Classifies the MCTS best-move value $\hat{v}_i \in [-1, +1]$ using symmetric $\pm \frac{1}{3}$ thresholds ([`src/evaluate.py`](../src/evaluate.py#L670-L675)):
 
   $$
   \hat{y}_i = \begin{cases}
@@ -82,18 +82,18 @@ Compares predicted outcome $\hat{y}_i \in \{-1, 0, +1\}$ against `true_wdl = sig
 > **Subtle Engineering Lesson: Why MCTS Must Use `-best_child.q_value`, NEVER `root.q_value`!**
 > Suppose at a root position, Column 4 is a winning move (`-child_4.q_value = +0.92`, visited 340 times), while Columns 1..7 include 6 losing moves (`-child_k.q_value = -0.90`, visited 10 times each during PUCT exploration).
 > What is `root.q_value`? It is the **visit-weighted average of ALL simulations through the root**, including those 60 exploratory visits to losing moves (`(340*0.92 - 60*0.90)/400 = +0.64`)—and in narrower positions, exploration dilutes `root.q_value` below `+0.33`, misclassifying wins as draws!
-> Game-theoretic value of a state under best play is the value of its **best move**, not the average of good and bad moves! `_run_python_batched_mcts` ([`src/evaluate.py`](../src/evaluate.py)) extracts **undiluted `-best_child.q_value`** (or the exact MCTS-Solver proof value `±1.0` / `0.0`).
+> Game-theoretic value of a state under best play is the value of its **best move**, not the average of good and bad moves! `CythonBatchedMCTS` ([`src/self_play.py`](../src/self_play.py)) and `_run_python_batched_mcts` ([`src/evaluate.py`](../src/evaluate.py)) extract **undiluted `-best_child.q_value`** (or the exact MCTS-Solver proof value `±1.0` / `0.0`).
 
 ### 3.3 Exact Move Optimality % & Blunder % (`get_dataset_child_wdl`)
 Notice that `gamesolver.org` lines only give the score of the *root* position—they don't list which of the 7 columns are optimal! (Often 2 or 3 columns all win or all hold a draw.)
 
-To grade *move selection* with 100% mathematical precision, `get_dataset_child_wdl` ([`src/evaluate.py`](../src/evaluate.py)) loads SHA256-cached `.npz` matrices from `testdata/.solver_cache/` (or runs the exact bounded-budget Pascal-Pons bitboard solver `_bb_solve_wdl`) to determine **all 7 child columns** of every benchmark position as an `int8[N, 7]` matrix:
+To grade *move selection* with 100% mathematical precision, `get_dataset_child_wdl` ([`src/evaluate.py`](../src/evaluate.py#L278-L382)) loads SHA256-cached `.npz` matrices from `testdata/.solver_cache/` (or runs the exact bounded-budget Pascal-Pons bitboard solver `_bb_solve_wdl` for tactical and endgame positions) to determine **all 7 child columns** of every benchmark position as an `int8[N, 7]` matrix:
 - `-2`: Illegal move (column is already full)
 - `-1`: Playing this column loses against best reply
 - `0`: Playing this column leads to a draw with best play
 - `+1`: Playing this column forces a win!
 
-*(Because solving 6,000 $\times$ 7 = 42,000 positions takes a few seconds the very first time, `get_dataset_child_wdl` caches the exact `int8[N, 7]` array on disk by SHA256 hash in `testdata/.solver_cache/*.npz`—so every subsequent benchmark or training run loads all 42,000 exact child outcomes in `< 5 ms`, even for `--limit` subsets!)*
+*(Precomputed SHA256 `.npz` child-WDL matrices in `testdata/.solver_cache/*.npz` allow every benchmark or training run to load all 42,000 exact child outcomes in `< 5 ms`, even for `--limit` subsets via `_lookup_moves_in_dir_cache`; if an uncached early-game split exceeds `_bb_solve_wdl`'s node budget, `get_dataset_child_wdl` returns `None` and reports `N/A` gracefully.)*
 
 Let $W_{i, c} \in \{-2, -1, 0, +1\}$ denote `child_wdl[i, c]`, let $a_i$ denote the agent's chosen column `best_actions[i]`, and let $w^*_i = \max_{c} W_{i, c}$ be the best achievable outcome on position $i$:
 1. **Optimal Move % (`optimal_move_pct`)**:
@@ -125,14 +125,14 @@ Tracks continuous calibration of $\hat{v}_i \in [-1, +1]$ against $\{-1.0, 0.0, 
 
 ## 4. Competitive Evaluation: Model-Isolated Paired-Opening Arena & Anchor Elo
 
-Dataset metrics test single-move decisions on fixed boards. To test whether the agent can **string together 40 moves of coherent pressure and convert advantages into actual wins**, `alphafour` runs head-to-head Arena matches (`play_batched_arena` in [`src/evaluate.py`](../src/evaluate.py#L1179-L1356)).
+Dataset metrics test single-move decisions on fixed boards. To test whether the agent can **string together 40 moves of coherent pressure and convert advantages into actual wins**, `alphafour` runs head-to-head Arena matches (`play_batched_arena` in [`src/evaluate.py`](../src/evaluate.py#L1031-L1192)).
 
 Building a fair, fast batched Connect Four Arena requires solving three classic pitfalls:
 
 ### Pitfall 1: Cross-Model Tree Contamination $\implies$ Strict Model Isolation
 When batching 40 Arena games simultaneously on a GPU, it is tempting to evaluate leaves across all active games using whichever model happens to be handy, or to share MCTS trees between turns of Player 1 and Player 2. **Never do that!** Model A's move choice must depend *100% on Model A's own neural evaluations* at its root and internal MCTS nodes, and *0% on Model B's weights*.
 
-At every ply of `play_batched_arena` ([`src/evaluate.py`](../src/evaluate.py#L1271-L1310)):
+At every ply of `play_batched_arena` ([`src/evaluate.py`](../src/evaluate.py#L1109-L1147)):
 1. Active games are partitioned into **`m1_turn_indices`** (boards where `model1` is to move) and **`m2_turn_indices`** (boards where `model2` is to move).
 2. A fresh batched MCTS search runs `sims_m1` simulations on `m1_turn_indices` querying **only `model1`**.
 3. A separate batched MCTS search runs `sims_m2` simulations on `m2_turn_indices` querying **only `model2`**.
@@ -142,7 +142,7 @@ In Connect Four:
 1. If two deterministic agents (`temperature = 0.0`, no noise) start from the empty board, all 40 games play the **exact same move sequence** 40 times!
 2. Furthermore, Connect Four is a **First-Player Win**—so if Model 1 plays Red more often or gets easier openings as Red, winrate reflects color luck rather than skill!
 
-`generate_paired_openings` ([`src/evaluate.py`](../src/evaluate.py#L1088-L1142)) solves both problems cleanly:
+`generate_paired_openings` ([`src/evaluate.py`](../src/evaluate.py#L945-L999)) solves both problems cleanly:
 1. Enumerates 2-to-4-ply opening sequences (`min_plies=2, max_plies=4`), shuffles deterministically (`seed=42`), and filters each candidate through a **6-ply bitboard tactical minimax check** (`_bb_shallow_tactical_score(..., depth=6) == 0`) so neither player starts in an accidental forced tactical win or loss!
 2. For `num_games = 40`, selects `20` balanced openings and plays **each opening twice**:
    - **Game $k$ (`0..19`)**: Opening $k$ with **`model1` as Player 1 (Red)** and `model2` as Player 2 (Yellow).
@@ -152,7 +152,7 @@ In Connect Four:
 ### Pitfall 3: Relative Drift $\implies$ Fixed Anchor Elo (`PureMCTSBaseline`)
 `main.py` runs **two** Arena matches every `--eval-interval` (default `5`) iterations:
 1. **Relative Arena (`Current vs Iter-(t - 10)`)**: Measures whether the newest checkpoint beats itself from 10 iterations ago. Great for spotting regressions, *but* relative winrate stays around 55–70% as both `t` and `t-10` get stronger together!
-2. **Absolute Anchor Arena (`Current vs PureMCTSBaseline`)**: Pits the current checkpoint (`400` sims) against **`PureMCTSBaseline`** ([`src/evaluate.py`](../src/evaluate.py#L1359-L1472)) running `200` MCTS-Solver simulations.
+2. **Absolute Anchor Arena (`Current vs PureMCTSBaseline`)**: Pits the current checkpoint (`400` sims) against **`PureMCTSBaseline`** ([`src/evaluate.py`](../src/evaluate.py#L1195-L1308)) running `200` MCTS-Solver simulations.
 
 What is `PureMCTSBaseline`? It is a **fast, non-neural, zero-learned-parameter MCTS player** whose `predict()` method combines:
 - A uniform policy prior over legal columns, and
@@ -164,7 +164,7 @@ What is `PureMCTSBaseline`? It is a **fast, non-neural, zero-learned-parameter M
 
   paired with the exact same MCTS-Solver tree search!
 
-Because `PureMCTSBaseline` never changes, pinning its rating at **`0 Elo`** gives an **absolute Elo ruler** across the entire training run (`compute_elo_diff` in [`src/evaluate.py`](../src/evaluate.py#L1475-L1481)):
+Because `PureMCTSBaseline` never changes, pinning its rating at **`0 Elo`** gives an **absolute Elo ruler** across the entire training run (`compute_elo_diff` in [`src/evaluate.py`](../src/evaluate.py#L1311-L1317)):
 
 $$
 \Delta \text{Elo} = 400 \log_{10}\!\left(\frac{s}{1 - s}\right), \qquad s = \text{clamp}\!\left(\frac{W + 0.5 D}{N_{\text{games}}},\; 10^{-3},\; 1 - 10^{-3}\right)

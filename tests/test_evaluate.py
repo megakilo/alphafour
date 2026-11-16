@@ -580,3 +580,66 @@ def test_cli_argparsers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert b_args.arena_anchor is True
     assert b_args.limit == 50
 
+
+def test_arena_mcts_solver_visit_filtering_for_wins_and_forced_blocks() -> None:
+    """Arena visit_counts must zero non-winning moves on proven wins and losing moves on blocks."""
+    device = torch.device("cpu")
+
+    class BiasedPriorModel:
+        def __init__(self, priors: list[float]) -> None:
+            self._priors = priors
+
+        def eval(self) -> BiasedPriorModel:
+            return self
+
+        def predict(
+            self, state: torch.Tensor, valid_moves: torch.Tensor | None = None
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            single = state.dim() == 3
+            bsz = 1 if single else state.shape[0]
+            pol = (
+                torch.tensor(self._priors, dtype=torch.float32, device=state.device)
+                .unsqueeze(0)
+                .expand(bsz, -1)
+                .clone()
+            )
+            if valid_moves is not None:
+                vm = valid_moves.unsqueeze(0) if single else valid_moves
+                pol = pol.masked_fill(~vm, 0.0)
+                pol = pol / pol.sum(dim=1, keepdim=True).clamp(min=1e-8)
+            val = torch.zeros((bsz,), dtype=torch.float32, device=state.device)
+            return (pol[0], val[0]) if single else (pol, val)
+
+    # Case A: "3747" -> P1 has Mate-in-2 at col 1 (or 4), while col 0 has huge prior 0.75
+    # and accumulates more visits (14 > 8) before col 1 proves forced win.
+    trap_win = BiasedPriorModel([0.75, 0.15, 0.02, 0.02, 0.02, 0.02, 0.02])
+    g_win = evaluate_mod._python_game_from_moves("3747")
+    vc_py_w, ba_py_w, bv_py_w = evaluate_mod._run_python_batched_mcts(
+        trap_win, device, [g_win], num_simulations=60
+    )
+    vc_cy_w = evaluate_mod._select_arena_actions_for_partition(
+        trap_win, device, [g_win], num_simulations=60
+    )
+    assert int(ba_py_w[0]) in (1, 4)
+    assert bv_py_w[0] == pytest.approx(1.0)
+    assert vc_py_w[0, 0] == 0.0
+    assert vc_cy_w[0, 0] == 0.0
+    assert int(np.argmax(vc_py_w[0])) in (1, 4)
+    assert int(np.argmax(vc_cy_w[0])) in (1, 4)
+
+    # Case B: "121365" -> P2 threatens Mate-in-1 at col 3; cols 0,1,2,4,5,6 all lose in 1 ply!
+    trap_blk = BiasedPriorModel([0.05, 0.05, 0.05, 0.01, 0.05, 0.05, 0.74])
+    g_blk = evaluate_mod._python_game_from_moves("121365")
+    vc_py_b, ba_py_b, _ = evaluate_mod._run_python_batched_mcts(
+        trap_blk, device, [g_blk], num_simulations=40
+    )
+    vc_cy_b = evaluate_mod._select_arena_actions_for_partition(
+        trap_blk, device, [g_blk], num_simulations=40
+    )
+    assert int(ba_py_b[0]) == 3
+    for losing_col in (0, 1, 2, 4, 5, 6):
+        assert vc_py_b[0, losing_col] == 0.0
+        assert vc_cy_b[0, losing_col] == 0.0
+    assert int(np.argmax(vc_py_b[0])) == 3
+    assert int(np.argmax(vc_cy_b[0])) == 3
+

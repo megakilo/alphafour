@@ -122,7 +122,7 @@ If you ever implement AlphaZero yourself, **90% of subtle bugs come from player 
 
 We do *not* train one network for Red (`+1`) and a second network for Yellow (`-1`). Instead, we train a **single** network that always views the board from the perspective of **`game.current_player`** (the player whose turn it is to move *right now*).
 
-Look at `ConnectFour.encode()` in [`src/game.py`](../src/game.py#L121-L134) (and `_encode_board_u8` in [`src/self_play.py`](../src/self_play.py)):
+Look at `ConnectFour.encode()` in [`src/game.py`](../src/game.py#L121-L134) (and `_encode_board_u8_to_slice` / `_encode_board_u8_to_history` in [`src/self_play.py`](../src/self_play.py)):
 
 ```python
 def get_canonical_board(self) -> np.ndarray:
@@ -190,22 +190,23 @@ Suppose a tiny game lasts 7 plies (`t = 0, 1, 2, 3, 4, 5, 6`), and **Player 1 wi
 | `5` | `-1` (Yellow) | Yellow's view | `[0.20, ..., 0.30, ...]` | Final `current_player = -1`, `result = -1.0` | **`-1.0`** |
 | `6` | `+1` (Red) | Red's view | `[0.00, 0.00, 0.00, 1.00, ...]` | Red plays winning stone $\to$ `current_player` flips to `-1` | **`+1.0`** |
 
-Look at how clean the value-assignment rule is in [`src/self_play.py`](../src/self_play.py):
+Look at how clean the value-assignment rule is in `_emit_mirrored_game_u8` ([`src/self_play.py`](../src/self_play.py)):
 
 ```python
-# At terminal state: `game.current_player` is the loser (-1), and `result` is -1.0 (or 0.0 for draw)
-for encoded, policy, player in histories[i]:
-    val = float(result) if player == game.current_player else float(-result)
+# At terminal state: `current_player` is the loser (-1), and `result` is -1.0 (or 0.0 for draw)
+for i in range(hlen):
+    entry = cython.address(slot[0].history[i])
+    val = result if entry[0].player == current_player else -result
 ```
 
-- For Yellow (`player == -1 == game.current_player`): `val = result = -1.0`.
-- For Red (`player == +1 != game.current_player`): `val = -result = +1.0`.
+- For Yellow (`entry[0].player == -1 == current_player`): `val = result = -1.0`.
+- For Red (`entry[0].player == +1 != current_player`): `val = -result = +1.0`.
 - If the game was a Draw (`result == 0.0`): both get `0.0`!
 
 Every single tuple `(s_t, π_t, z_t)` in the replay buffer obeys one universal invariant:
 
 > **Universal Perspective Invariant**:
-> Across the entire codebase—board encoding, neural network value output, MCTS node `q_value`, MCTS `SolverState`, and training target $z_t$—every value is measured strictly from the perspective of **the player whose turn it is to move at that state**.
+> Across the entire codebase—board encoding, neural network value output, MCTS node `q_value`, MCTS `solver_state`, and training target $z_t$—every value is measured strictly from the perspective of **the player whose turn it is to move at that state**.
 
 ---
 

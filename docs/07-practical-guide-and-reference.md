@@ -117,8 +117,8 @@ uv run main.py --iterations 200
 # Force single-GPU execution on a multi-GPU workstation
 uv run main.py --gpus 1
 
-# Explicit torchrun launch across 4 GPUs
-OMP_NUM_THREADS=1 uv run torchrun --standalone --nproc_per_node=4 main.py
+# Explicit torchrun launch across 4 GPUs (partition CPU OpenMP threads across ranks)
+OMP_NUM_THREADS=$(( $(nproc) / 4 )) uv run torchrun --standalone --nproc_per_node=4 main.py
 ```
 
 ### 3.3 Deep Checkpoint Verification (`benchmark.py`)
@@ -174,6 +174,7 @@ uv run play.py --computer-first --hints --simulations 800
 | `AlphaZeroNet` (`src.model`) | `forward(x: [B,3,6,7]) -> (logits[B,7], wdl[B,3])`<br>`predict_wdl(s, mask) -> (pol, wdl_probs, val)`<br>`predict_packed(s_u8, mask) -> float32[B, 8]` | SE-ResNet with 32-ch policy head and 16-ch `[Loss, Draw, Win]` value head (`val = P(Win) - P(Loss)`). |
 | `MCTS` (`src.mcts`) | `.search_with_values(game, add_noise)`<br>`.get_action_probs(game, temperature, add_noise)`<br>`.advance_move(col)` / `.reset()` | Single-game Python MCTS-Solver with FPU reduction and subtree reuse across turns. |
 | `CythonBatchedSelfPlay` (`src.self_play`) | `.collect_continuous_u8()`<br>`.apply_continuous_packed(packed)`<br>`.take_completed_u8()` / `.take_completed_f32()` | OpenMP-parallel Cython Pure Python Mode batched MCTS-Solver self-play engine. |
+| `CythonBatchedMCTS` (`src.self_play`) | `.collect_leaves_u8()`<br>`.apply_evaluations_packed(packed)`<br>`.get_results() -> (visits, best_actions, best_values)` | OpenMP-parallel Cython Pure Python Mode noiseless batched MCTS-Solver engine for dataset evaluation & Arena. |
 | `run_self_play` (`src.self_play`) | `(model, num_games, num_simulations, ..., return_arrays=True, return_uint8=True)` | Runs batched self-play + $2\times$ mirror augmentation, returning `(states, policies, values)`. |
 | `ReplayBuffer` (`src.trainer`) | `.add_batch(s, p, v)`<br>`.sample_tensors(B, device) -> (s, p, v)` | Preallocated `uint8` circular buffer with $O(B)$ analytical 2:1 recency sampling. |
 | `Trainer` (`src.trainer`) | `.train_epoch(replay_buffer, num_batches)`<br>`.step_scheduler()` / `.restore_scheduler(...)` | BF16/FP16 AMP + DDP + `torch.compile` trainer with AdamW and Warmup+Cosine LR. |

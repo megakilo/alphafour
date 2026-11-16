@@ -30,10 +30,13 @@ from src.mcts import MCTS
 from src.model import AlphaZeroNet
 from src.self_play import (
     CYTHON_COMPILED,
+    BatchedMCTS,
     BatchedSelfPlay,
+    CythonBatchedMCTS,
     CythonBatchedSelfPlay,
     is_cython_compiled,
     play_batched_games,
+    run_batched_mcts,
     run_self_play,
 )
 
@@ -553,5 +556,50 @@ class TestCompiledVsUncompiledAndReferenceParity:
             assert abs(cy_plies - un_plies) < 14.0
             assert np.all(np.isin(v_cy_s, np.array([-1.0, 0.0, 1.0], dtype=np.float32)))
             npt.assert_allclose(p_cy_s.sum(axis=1), 1.0, atol=1e-5)
+        finally:
+            sys.modules.pop(spec.name, None)
+
+    def test_cython_batched_mcts_compiled_and_uncompiled_parity(self) -> None:
+        """Verify `CythonBatchedMCTS` / `run_batched_mcts` in both compiled .so and Pure Python .py."""
+        assert BatchedMCTS is CythonBatchedMCTS
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        torch.manual_seed(99)
+        model = AlphaZeroNet(num_res_blocks=2, num_filters=32).to(device)
+        model.eval()
+
+        src_path = REPO_ROOT / "src" / "self_play.py"
+        spec = importlib.util.spec_from_file_location(
+            "_batched_mcts_uncompiled", src_path
+        )
+        assert spec is not None and spec.loader is not None
+        pure_mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = pure_mod
+        try:
+            spec.loader.exec_module(pure_mod)
+            assert pure_mod.is_cython_compiled() is False
+
+            # Empty board (""), Mate-in-1 at col 0 ("121212"), and already-won terminal ("1212121")
+            moves_batch = ["", "121212", "1212121"]
+            vc_c, ba_c, bv_c = run_batched_mcts(model, device, moves_batch, 32)
+            vc_u, ba_u, bv_u = pure_mod.run_batched_mcts(model, device, moves_batch, 32)
+
+            npt.assert_allclose(vc_c, vc_u, atol=1e-5)
+            npt.assert_array_equal(ba_c, ba_u)
+            npt.assert_allclose(bv_c, bv_u, atol=1e-5)
+
+            assert vc_c[0].sum() == pytest.approx(32.0)
+            assert int(ba_c[1]) == 0 and bv_c[1] == pytest.approx(1.0)
+            assert vc_c[1, 0] > 0.0 and float(vc_c[1, 1:].sum()) == 0.0
+            assert float(vc_c[2].sum()) == 0.0 and bv_c[2] == pytest.approx(-1.0)
+
+            # Also verify `ConnectFour` object input matches move-string input identically
+            g_open = ConnectFour()
+            g_win1 = ConnectFour()
+            for col in (0, 1, 0, 1, 0, 1):
+                g_win1.make_move(col)
+            vc_g, ba_g, bv_g = run_batched_mcts(model, device, [g_open, g_win1], 32)
+            npt.assert_allclose(vc_g, vc_c[:2], atol=1e-5)
+            npt.assert_array_equal(ba_g, ba_c[:2])
+            npt.assert_allclose(bv_g, bv_c[:2], atol=1e-5)
         finally:
             sys.modules.pop(spec.name, None)
