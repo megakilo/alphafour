@@ -36,8 +36,51 @@ try:
 except ImportError:
     RUST_AVAILABLE = False
 
+try:
+    from .cython_self_play import CythonBatchedSelfPlay, is_cython_compiled
+
+    CYTHON_AVAILABLE = True
+    CYTHON_COMPILED = bool(is_cython_compiled())
+except ImportError:
+    CythonBatchedSelfPlay = None  # type: ignore[assignment,misc]
+
+    def is_cython_compiled() -> bool:
+        return False
+
+    CYTHON_AVAILABLE = False
+    CYTHON_COMPILED = False
+
+VALID_SELF_PLAY_BACKENDS = ("auto", "rust", "cython", "python")
+
 SelfPlayExample = tuple[np.ndarray, np.ndarray, float]
 SelfPlayArrays = tuple[np.ndarray, np.ndarray, np.ndarray]
+
+
+def _resolve_backend(backend: str) -> str:
+    """Resolve `'auto'` or validate an explicit self-play backend name."""
+    if backend == "auto":
+        if RUST_AVAILABLE:
+            return "rust"
+        if CYTHON_AVAILABLE and CYTHON_COMPILED:
+            return "cython"
+        return "python"
+    if backend == "rust":
+        if not RUST_AVAILABLE:
+            raise RuntimeError(
+                "Self-play backend 'rust' requested, but 'alphafour_engine' is not installed."
+            )
+        return "rust"
+    if backend == "cython":
+        if not CYTHON_AVAILABLE or CythonBatchedSelfPlay is None:
+            raise RuntimeError(
+                "Self-play backend 'cython' requested, but 'src.cython_self_play' is not available."
+            )
+        return "cython"
+    if backend == "python":
+        return "python"
+    raise ValueError(
+        f"Unknown self-play backend {backend!r}; expected one of {VALID_SELF_PLAY_BACKENDS}."
+    )
 
 
 @contextlib.contextmanager
@@ -160,15 +203,33 @@ def play_batched_games(
     c_fpu: float = DEFAULT_C_FPU,
     return_arrays: bool = False,
     return_uint8: bool = False,
+    backend: str = "auto",
 ) -> list[SelfPlayExample] | SelfPlayArrays:
     """Play multiple self-play games simultaneously using Batched MCTS.
 
-    Uses the Rust engine if available, otherwise falls back to Python.
-    Note: Rust `advance_games()` already emits horizontally mirrored pairs;
+    Uses the Rust engine if available (`backend="auto"`), or compiled Cython if Rust is
+    unavailable, otherwise falls back to Python. Explicit `"rust"`, `"cython"`, or
+    `"python"` backends are also supported.
+    Note: Rust and Cython engines already emit horizontally mirrored pairs;
     `_play_batched_python` emits un-augmented examples (augmented in `run_self_play`).
     """
-    if RUST_AVAILABLE:
+    resolved = _resolve_backend(backend)
+    if resolved == "rust":
         return _play_batched_rust(
+            model=model,
+            num_games=num_games,
+            num_simulations=num_simulations,
+            c_puct=c_puct,
+            dirichlet_alpha=dirichlet_alpha,
+            dirichlet_epsilon=dirichlet_epsilon,
+            temp_threshold=temp_threshold,
+            random_opening_plies=random_opening_plies,
+            c_fpu=c_fpu,
+            return_arrays=return_arrays,
+            return_uint8=return_uint8,
+        )
+    if resolved == "cython":
+        return _play_batched_cython(
             model=model,
             num_games=num_games,
             num_simulations=num_simulations,
@@ -197,6 +258,90 @@ def play_batched_games(
         st, pol, val = out  # type: ignore[misc]
         return np.ascontiguousarray(st > 0.5, dtype=np.uint8), pol, val
     return out
+
+
+_ORIGINAL_PLAY_BATCHED_GAMES = play_batched_games
+
+
+def _play_batched_cython(
+    model: AlphaZeroNet,
+    num_games: int,
+    num_simulations: int,
+    c_puct: float = 1.5,
+    dirichlet_alpha: float = DEFAULT_DIRICHLET_ALPHA,
+    dirichlet_epsilon: float = 0.25,
+    temp_threshold: int = TEMP_THRESHOLD,
+    random_opening_plies: int = RANDOM_OPENING_PLIES,
+    c_fpu: float = DEFAULT_C_FPU,
+    return_arrays: bool = False,
+    return_uint8: bool = False,
+) -> list[SelfPlayExample] | SelfPlayArrays:
+    """High-performance self-play using the Cython Pure Python Mode MCTS engine."""
+    if not CYTHON_AVAILABLE or CythonBatchedSelfPlay is None:
+        raise RuntimeError(
+            "Self-play backend 'cython' requested, but 'src.cython_self_play' is not available."
+        )
+    if num_games <= 0:
+        return _empty_arrays(uint8_states=return_uint8) if return_arrays else []
+
+    device = next(model.parameters()).device
+    model.eval()
+
+    engine = CythonBatchedSelfPlay(
+        num_games,
+        num_simulations,
+        c_puct,
+        dirichlet_alpha,
+        dirichlet_epsilon,
+        temp_threshold,
+        random_opening_plies,
+        c_fpu,
+    )
+
+    pbar = tqdm(
+        total=num_games,
+        desc="    Self-play",
+        unit="game",
+        disable=_disable_tqdm(),
+    )
+    while not engine.is_done():
+        leaf_states_u8, leaf_valid, count, fin_collect = (
+            engine.collect_continuous_u8()
+        )
+        if fin_collect > 0:
+            pbar.update(fin_collect)
+        if count > 0:
+            packed_np = _predict_packed_numpy(
+                model, device, leaf_states_u8, leaf_valid
+            )
+            fin_apply = engine.apply_continuous_packed(packed_np)
+            if fin_apply > 0:
+                pbar.update(fin_apply)
+        elif engine.is_done():
+            break
+    pbar.close()
+
+    if return_arrays:
+        if return_uint8:
+            s_u8, pol_arr, val_arr = engine.take_completed_u8()
+            return (
+                np.ascontiguousarray(s_u8, dtype=np.uint8),
+                np.ascontiguousarray(pol_arr, dtype=np.float32),
+                np.ascontiguousarray(val_arr, dtype=np.float32),
+            )
+        s_f32, pol_arr, val_arr = engine.take_completed_f32()
+        return (
+            np.ascontiguousarray(s_f32, dtype=np.float32),
+            np.ascontiguousarray(pol_arr, dtype=np.float32),
+            np.ascontiguousarray(val_arr, dtype=np.float32),
+        )
+
+    s_f32, pol_arr, val_arr = engine.take_completed_f32()
+    return _arrays_to_examples(
+        np.ascontiguousarray(s_f32, dtype=np.float32),
+        np.ascontiguousarray(pol_arr, dtype=np.float32),
+        np.ascontiguousarray(val_arr, dtype=np.float32),
+    )
 
 
 def _play_batched_rust(
@@ -720,7 +865,7 @@ def augment_arrays(
 ) -> SelfPlayArrays:
     """Augment contiguous numpy training arrays by horizontal mirroring without Python loops."""
     if len(states) == 0:
-        return _empty_arrays()
+        return _empty_arrays(uint8_states=(states.dtype == np.uint8))
 
     mirrored_states = states[:, :, :, ::-1]
     mirrored_policies = policies[:, ::-1]
@@ -749,6 +894,7 @@ def run_self_play(
     c_fpu: float = DEFAULT_C_FPU,
     return_arrays: bool = False,
     return_uint8: bool = False,
+    backend: str = "auto",
 ) -> list[SelfPlayExample] | SelfPlayArrays:
     """Run self-play games using Batched MCTS with horizontal mirror augmentation.
 
@@ -756,7 +902,15 @@ def run_self_play(
     contiguous numpy arrays `(N, 3, 6, 7), (N, 7), (N,)` (`uint8` states when
     `return_uint8=True`, else `float32`) with zero Python per-example tuple loop.
     """
-    extra_kwargs = {"return_uint8": True} if return_uint8 else {}
+    resolved = _resolve_backend(backend)
+    is_mocked_play = play_batched_games is not _ORIGINAL_PLAY_BATCHED_GAMES
+
+    extra_kwargs: dict[str, object] = {}
+    if return_uint8:
+        extra_kwargs["return_uint8"] = True
+    if backend != "auto":
+        extra_kwargs["backend"] = backend
+
     result = play_batched_games(
         model=model,
         num_games=num_games,
@@ -768,11 +922,16 @@ def run_self_play(
         random_opening_plies=random_opening_plies,
         c_fpu=c_fpu,
         return_arrays=return_arrays,
-        **extra_kwargs,
+        **extra_kwargs,  # type: ignore[arg-type]
     )
 
-    # Rust engine already emits augmented pairs directly
-    if RUST_AVAILABLE:
+    # Rust and Cython engines already emit horizontally mirrored pairs directly
+    if is_mocked_play and backend == "auto":
+        already_augmented = bool(RUST_AVAILABLE)
+    else:
+        already_augmented = resolved in ("rust", "cython")
+
+    if already_augmented:
         return result
 
     if return_arrays:

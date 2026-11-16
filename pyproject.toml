@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alphafour-engine",
+    "cython>=3.0",
     "numpy",
+    "setuptools>=81.0.0",
     "torch",
     "tqdm",
 ]

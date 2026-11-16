@@ -176,6 +176,13 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Number of CUDA GPUs for DDP training (default: auto-detect all visible GPUs; 1 = single-GPU)",
     )
+    parser.add_argument(
+        "--self-play-backend",
+        type=str,
+        choices=["auto", "rust", "cython", "python"],
+        default="auto",
+        help="Self-play MCTS engine backend (default: auto)",
+    )
 
     return parser.parse_args()
 
@@ -312,6 +319,7 @@ def _run_training(
             f"   Model: {args.res_blocks} res blocks, {args.filters} filters "
             f"(compile={args.compile})"
         )
+        print(f"   Self-play backend: {args.self_play_backend}")
         print()
 
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -418,6 +426,7 @@ def _run_training(
         replay_buffer, "add_batch"
     )
     sp_supports_uint8 = "return_uint8" in sp_params
+    sp_supports_backend = "backend" in sp_params
 
     # Main training loop
     for iteration in range(start_iteration, args.iterations):
@@ -435,15 +444,18 @@ def _run_training(
             )
             print(
                 f"  🎲 Self-play: {args.games_per_iteration} games{shard_note}, "
-                f"{args.training_simulations} sims/move ..."
+                f"{args.training_simulations} sims/move (backend={args.self_play_backend}) ..."
             )
         model.eval()
 
         sp_start = time.time()
+        sp_backend_arg = getattr(args, "self_play_backend", "auto")
         if sp_supports_arrays:
             sp_kwargs: dict[str, Any] = {"return_arrays": True}
             if sp_supports_uint8:
                 sp_kwargs["return_uint8"] = True
+            if sp_supports_backend:
+                sp_kwargs["backend"] = sp_backend_arg
             states_arr, policies_arr, values_arr = run_self_play(
                 model=model,
                 num_games=local_games,
@@ -464,10 +476,14 @@ def _run_training(
                 replay_buffer.add_batch(states_arr, policies_arr, values_arr)
                 num_generated = len(states_arr)
         else:
+            legacy_sp_kwargs: dict[str, Any] = {}
+            if sp_supports_backend:
+                legacy_sp_kwargs["backend"] = sp_backend_arg
             examples = run_self_play(
                 model=model,
                 num_games=local_games,
                 num_simulations=args.training_simulations,
+                **legacy_sp_kwargs,
             )
             if world_size > 1:
                 if examples:
