@@ -218,12 +218,12 @@ def benchmark_mode1_pure_engine(
     )
     print(
         f"  Trials: {warmup_trials} warmup + {timed_trials} timed (interleaved Cython/Rust) | "
-        "Note: Rust uses Rayon thread pool; positions/s = 2x mirrored examples/s"
+        "Note: Cython uses OpenMP prange, Rust uses Rayon; positions/s = 2x mirrored examples/s"
     )
     print("=" * 116)
     header = (
         f"{'Workload':<12} | {'Backend':<8} | {'Games/s':<17} | "
-        f"{'Positions/s (2x)':<21} | {'MCTS Sims/s':<21} | {'us/batch':<15} | {'Cy/Rust':<8}"
+        f"{'Positions/s (2x)':<20} | {'MCTS Sims/s':<21} | {'us/batch':<15} | {'Cy/Rs Games':<11} | {'Cy/Rs Sims':<10}"
     )
     print(header)
     print("-" * len(header))
@@ -278,18 +278,19 @@ def benchmark_mode1_pure_engine(
         cy_ub_m, cy_ub_s = _mean_std([x.us_per_batch for x in cy_trials])
         rs_ub_m, rs_ub_s = _mean_std([x.us_per_batch for x in rs_trials])
 
-        ratio_pct = (cy_gps_m / rs_gps_m * 100.0) if rs_gps_m > 0 else 0.0
+        ratio_gps = (cy_gps_m / rs_gps_m * 100.0) if rs_gps_m > 0 else 0.0
+        ratio_sps = (cy_sps_m / rs_sps_m * 100.0) if rs_sps_m > 0 else 0.0
         wl_str = f"({num_games}, {num_sims})"
 
         print(
             f"{wl_str:<12} | {'Cython':<8} | {_fmt_ms(cy_gps_m, cy_gps_s, 1):<17} | "
-            f"{_fmt_ms(cy_pps_m, cy_pps_s, 0):<21} | {_fmt_ms(cy_sps_m, cy_sps_s, 0):<21} | "
-            f"{_fmt_ms(cy_ub_m, cy_ub_s, 1):<15} | {ratio_pct:6.1f}%"
+            f"{_fmt_ms(cy_pps_m, cy_pps_s, 0):<20} | {_fmt_ms(cy_sps_m, cy_sps_s, 0):<21} | "
+            f"{_fmt_ms(cy_ub_m, cy_ub_s, 1):<15} | {ratio_gps:10.1f}% | {ratio_sps:9.1f}%"
         )
         print(
             f"{'':<12} | {'Rust':<8} | {_fmt_ms(rs_gps_m, rs_gps_s, 1):<17} | "
-            f"{_fmt_ms(rs_pps_m, rs_pps_s, 0):<21} | {_fmt_ms(rs_sps_m, rs_sps_s, 0):<21} | "
-            f"{_fmt_ms(rs_ub_m, rs_ub_s, 1):<15} | {'100.0%':>7}"
+            f"{_fmt_ms(rs_pps_m, rs_pps_s, 0):<20} | {_fmt_ms(rs_sps_m, rs_sps_s, 0):<21} | "
+            f"{_fmt_ms(rs_ub_m, rs_ub_s, 1):<15} | {'100.0%':>11} | {'100.0%':>10}"
         )
         print("-" * len(header))
     print()
@@ -318,7 +319,7 @@ def benchmark_mode2_end_to_end(
     print("=" * 116)
     header = (
         f"{'Workload':<12} | {'Backend':<8} | {'Games/s':<17} | "
-        f"{'Positions/s (2x)':<21} | {'MCTS Sims/s':<21} | {'Avg Plies':<10} | {'Cy/Rust':<8}"
+        f"{'Positions/s (2x)':<20} | {'MCTS Sims/s':<21} | {'Avg Plies':<10} | {'Cy/Rs Games':<11} | {'Cy/Rs Sims':<10}"
     )
     print(header)
     print("-" * len(header))
@@ -366,18 +367,19 @@ def benchmark_mode2_end_to_end(
         cy_plies = statistics.mean([x.raw_plies / x.num_games for x in cy_trials])
         rs_plies = statistics.mean([x.raw_plies / x.num_games for x in rs_trials])
 
-        ratio_pct = (cy_gps_m / rs_gps_m * 100.0) if rs_gps_m > 0 else 0.0
+        ratio_gps = (cy_gps_m / rs_gps_m * 100.0) if rs_gps_m > 0 else 0.0
+        ratio_sps = (cy_sps_m / rs_sps_m * 100.0) if rs_sps_m > 0 else 0.0
         wl_str = f"({num_games}, {num_sims})"
 
         print(
             f"{wl_str:<12} | {'Cython':<8} | {_fmt_ms(cy_gps_m, cy_gps_s, 2):<17} | "
-            f"{_fmt_ms(cy_pps_m, cy_pps_s, 0):<21} | {_fmt_ms(cy_sps_m, cy_sps_s, 0):<21} | "
-            f"{cy_plies:10.1f} | {ratio_pct:6.1f}%"
+            f"{_fmt_ms(cy_pps_m, cy_pps_s, 0):<20} | {_fmt_ms(cy_sps_m, cy_sps_s, 0):<21} | "
+            f"{cy_plies:10.1f} | {ratio_gps:10.1f}% | {ratio_sps:9.1f}%"
         )
         print(
             f"{'':<12} | {'Rust':<8} | {_fmt_ms(rs_gps_m, rs_gps_s, 2):<17} | "
-            f"{_fmt_ms(rs_pps_m, rs_pps_s, 0):<21} | {_fmt_ms(rs_sps_m, rs_sps_s, 0):<21} | "
-            f"{rs_plies:10.1f} | {'100.0%':>7}"
+            f"{_fmt_ms(rs_pps_m, rs_pps_s, 0):<20} | {_fmt_ms(rs_sps_m, rs_sps_s, 0):<21} | "
+            f"{rs_plies:10.1f} | {'100.0%':>11} | {'100.0%':>10}"
         )
         print("-" * len(header))
     print()
@@ -523,15 +525,17 @@ def main() -> None:
                     timed_trials=args.trials,
                 )
 
-        # 2B. End-to-End CPU Benchmark
+        # 2B. End-to-End CPU Benchmark (compact ResNet-4x64 so CPU conv2d finishes in ~15s)
         if not args.skip_cpu_e2e:
             benchmark_mode2_end_to_end(
-                title="End-to-End Self-Play on CPU — AlphaZeroNet(10, 128) FP32",
+                title="End-to-End Self-Play on CPU — AlphaZeroNet(4, 64) FP32",
                 device=torch.device("cpu"),
                 use_compile=False,
-                workloads=[(32, 100), (64, 200)],
+                workloads=[(8, 50), (16, 100)],
                 warmup_trials=1,
-                timed_trials=max(2, args.trials - 1),
+                timed_trials=args.trials,
+                res_blocks=4,
+                filters=64,
             )
 
         # 3. Small-config 3-way comparison with Pure Python fallback

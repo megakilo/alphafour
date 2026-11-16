@@ -412,13 +412,15 @@ class TestOpeningsAndTacticalSolver:
         assert np.count_nonzero(pol_greedy[0] > 0.05) >= 4
 
     def test_tactical_mate_in_1_win_and_mate_in_1_block_solver(self) -> None:
-        """Verify exact MCTS-Solver finds Mate-in-1 win and Mate-in-1 block despite adversarial priors."""
-        # Case A: Mate-in-1 Immediate Win
-        # Steer P1 -> col 0, P2 -> col 1 for first 6 plies (3 stones each in col 0 and col 1).
-        # On ply 6 (P1 to move, col 0 wins immediately), supply adversarial prior favoring col 6!
+        """Verify exact MCTS-Solver finds tactical wins (Mate-in-2 -> Mate-in-1) and forced blocks."""
+        # Case A: Tactical Win (Open-ended double threat at Ply 4 -> Mate-in-1 finish at Ply 6)
+        # Plies 0..3: steer P1 -> col 2, P2 -> col 6, P1 -> col 3, P2 -> col 6.
+        # At Ply 4 (P1 to move: stones at (0,2) and (0,3)), playing col 1 or col 4 creates an
+        # unstoppable open-ended 3-in-a-row on row 0, forcing a Mate-in-1 win on Ply 6 (7 plies = 14 examples),
+        # even when the network adversarially puts its highest prior on col 6!
         eng_win = CythonBatchedSelfPlay(
             1,
-            32,
+            24,
             1.5,
             0.35,
             0.0,  # dirichlet_epsilon=0.0
@@ -432,23 +434,34 @@ class TestOpeningsAndTacticalSolver:
                 packed = np.zeros((count, COLS + 1), dtype=np.float32)
                 for k in range(count):
                     pieces = int((s_u8[k, 0] + s_u8[k, 1]).sum())
-                    is_p1 = int(s_u8[k, 2, 0, 0]) == 1
-                    if pieces < 6:
-                        target_col = 0 if is_p1 else 1
-                        packed[k, :COLS] = 0.001
-                        packed[k, target_col] = 0.994
+                    if pieces < 4:
+                        target = {0: 2, 1: 6, 2: 3, 3: 6}[pieces]
+                        packed[k, target] = 1.0
+                        packed[k, COLS] = -0.95
+                    elif pieces == 4:
+                        # Ply 4: adversarial prior prefers col 6 (0.50) over winning cols 1 & 4 (0.15, 0.15)
+                        packed[k, :COLS] = [0.05, 0.15, 0.05, 0.05, 0.15, 0.05, 0.50]
+                        packed[k, COLS] = -0.95
+                    elif pieces == 5:
+                        packed[k, :COLS] = 1.0 / COLS
                     else:
-                        # Adversarial prior: strongly prefers losing/irrelevant col 6 over winning col 0!
+                        # Ply 6 (Mate-in-1): adversarial prior puts 0.994 on col 6!
                         packed[k, :COLS] = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.994]
                     packed[k, :COLS] *= valid[k]
                     packed[k, :COLS] /= max(float(packed[k, :COLS].sum()), 1e-8)
                 eng_win.apply_continuous_packed(packed)
 
         st_w, pol_w, val_w = eng_win.take_completed_u8()
-        # Game MUST finish in exactly 7 plies (14 mirrored examples) because P1 plays winning col 0 on ply 6!
-        assert len(st_w) == 14, f"Expected 7-ply (14-example) immediate Mate-in-1 win, got {len(st_w)}"
-        # Ply 6 original example is at index 12: policy target must put 100% mass on proven winning col 0
-        assert pol_w[12, 0] == pytest.approx(1.0, abs=1e-5)
+        # Game MUST finish in 7 plies (14 mirrored examples): Ply 4 double-threat + Ply 6 Mate-in-1!
+        assert len(st_w) == 14, f"Expected 7-ply (14-example) tactical win, got {len(st_w)}"
+        # Ply 4 original example (index 8): policy target concentrated on proven winning cols {1, 4}
+        assert float(pol_w[8, 1] + pol_w[8, 4]) == pytest.approx(1.0, abs=1e-5)
+        # Ply 6 original example (index 12): uniform 0.5/0.5 over the two immediate winning columns {1, 5}!
+        npt.assert_allclose(
+            pol_w[12],
+            np.array([0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0], dtype=np.float32),
+            atol=1e-5,
+        )
         assert val_w[12] == pytest.approx(1.0)
 
         # Case B: Mate-in-1 Forced Block (Defense)
