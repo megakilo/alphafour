@@ -31,8 +31,8 @@ else:
 
 extensions = [
     Extension(
-        name="src.cython_self_play",
-        sources=["src/cython_self_play.py"],
+        name="src.self_play",
+        sources=["src/self_play.py"],
         include_dirs=[np.get_include()],
         extra_compile_args=extra_compile_args,
         extra_link_args=extra_link_args,
@@ -40,13 +40,14 @@ extensions = [
 ]
 
 setup(
-    name="alphafour-cython-self-play",
+    name="alphafour-self-play",
     packages=["src"],
     package_dir={"src": "src"},
     ext_modules=cythonize(
         extensions,
         compiler_directives={
             "language_level": "3",
+            "binding": True,
             "boundscheck": False,
             "wraparound": False,
             "cdivision": True,

@@ -100,11 +100,10 @@ def test_arena_strict_model_isolation_single_game(monkeypatch: pytest.MonkeyPatc
         dev: torch.device,
         partition_games: list[Any],
         num_simulations: int,
-        use_rust: bool,
     ) -> np.ndarray:
         m1_before = len(model1.calls)
         m2_before = len(model2.calls)
-        out = orig_select(model, dev, partition_games, num_simulations, use_rust)
+        out = orig_select(model, dev, partition_games, num_simulations)
         m1_delta = len(model1.calls) - m1_before
         m2_delta = len(model2.calls) - m2_before
         if model is model1:
@@ -169,11 +168,10 @@ def test_arena_strict_model_isolation_batched_paired(
         dev: torch.device,
         partition_games: list[Any],
         num_simulations: int,
-        use_rust: bool,
     ) -> np.ndarray:
         m1_before = len(model1.calls)
         m2_before = len(model2.calls)
-        out = orig_select(model, dev, partition_games, num_simulations, use_rust)
+        out = orig_select(model, dev, partition_games, num_simulations)
         if model is model1:
             assert len(model2.calls) == m2_before
         else:
@@ -482,13 +480,13 @@ def test_solver_ground_truth_and_fast_npz_cache(tmp_path: Path) -> None:
     assert load_ms < 25.0  # Typically ~0.3ms
 
 
-def test_solver_graceful_none_on_deep_position_without_rust(
+def test_solver_graceful_none_on_deep_uncached_position(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """When neither cache nor Rust solver is available on deep positions, optimal_move_pct is None."""
-    monkeypatch.setattr(evaluate_mod, "RUST_SOLVER_AVAILABLE", False)
+    """When uncached deep positions exceed the bounded node budget, optimal_move_pct is None."""
+    monkeypatch.setattr(evaluate_mod, "DEFAULT_SOLVER_CACHE_DIR", tmp_path)
     _MEMORY_SOLVER_CACHE.clear()
-    deep_lines = ["44 1"]  # 40 empty squares -> exceeds tiny Python node budget
+    deep_lines = ["44 1"]  # 40 empty squares -> exceeds bounded node budget when uncached
     child_wdl = get_dataset_child_wdl(
         deep_lines, cache_dir=tmp_path, use_cache=False, python_max_nodes=10
     )
@@ -501,10 +499,8 @@ def test_solver_graceful_none_on_deep_position_without_rust(
         num_simulations=0,
         child_wdl=None,
     )
-    # Note: evaluate_dataset calls get_dataset_child_wdl with default 25k budget which also returns None on 2-ply
-    if not evaluate_mod.RUST_SOLVER_AVAILABLE:
-        assert res["optimal_move_pct"] is None
-        assert res["blunder_pct"] is None
+    assert res["optimal_move_pct"] is None
+    assert res["blunder_pct"] is None
 
 
 # ── 5. Opening Move, Anchor Elo, and CLI Smoke Tests ────────────────────────
@@ -583,148 +579,4 @@ def test_cli_argparsers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert b_args.both is True
     assert b_args.arena_anchor is True
     assert b_args.limit == 50
-
-
-def test_rust_batched_mcts_and_solver_adapter_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Verify the RustBatchedMCTS + solve_batch_children_wdl FFI adapter code paths."""
-    from src.game import ConnectFour
-
-    class FakeRustConnectFour:
-        def __init__(self) -> None:
-            self._g = ConnectFour()
-
-        @classmethod
-        def from_moves(cls, moves_str: str) -> FakeRustConnectFour:
-            inst = cls()
-            for ch in moves_str:
-                inst._g.make_move(int(ch) - 1)
-            return inst
-
-        @property
-        def current_player(self) -> int:
-            return self._g.current_player
-
-        def make_move(self, col: int) -> None:
-            self._g.make_move(col)
-
-        def is_terminal(self) -> bool:
-            return self._g.is_terminal()
-
-        def get_result(self) -> float | None:
-            return self._g.get_result()
-
-        def get_valid_moves(self) -> np.ndarray:
-            return self._g.get_valid_moves()
-
-        def encode(self) -> np.ndarray:
-            return self._g.encode()
-
-    class FakeRustBatchedMCTS:
-        def __init__(
-            self,
-            games: list[FakeRustConnectFour],
-            num_simulations: int,
-            c_puct: float = 1.5,
-            c_fpu: float = 0.20,
-        ) -> None:
-            self.games = games
-            self.num_simulations = num_simulations
-            self._steps = 0
-            self._pols: np.ndarray | None = None
-            self._vals: np.ndarray | None = None
-
-        def get_root_states(self) -> tuple[np.ndarray, np.ndarray]:
-            states = np.stack([g.encode() for g in self.games]).astype(np.float32)
-            valid = np.stack([g.get_valid_moves() for g in self.games]).astype(bool)
-            return states, valid
-
-        def init_roots(self, policies: np.ndarray) -> None:
-            assert policies.dtype == np.float32
-            assert policies.flags["C_CONTIGUOUS"]
-            self._pols = policies
-
-        def is_done(self) -> bool:
-            return self._steps >= 1
-
-        def collect_leaves(self) -> tuple[np.ndarray, np.ndarray, int]:
-            states = np.stack([g.encode() for g in self.games]).astype(np.float32)
-            valid = np.stack([g.get_valid_moves() for g in self.games]).astype(bool)
-            return states, valid, len(self.games)
-
-        def apply_evaluations(self, policies: np.ndarray, values: np.ndarray) -> None:
-            assert policies.dtype == np.float32
-            assert values.dtype == np.float32
-            assert policies.flags["C_CONTIGUOUS"]
-            assert values.flags["C_CONTIGUOUS"]
-            self._vals = values
-            self._steps += 1
-
-        def get_results(
-            self,
-        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-            n = len(self.games)
-            assert self._pols is not None and self._vals is not None
-            vc = np.zeros((n, COLS), dtype=np.float32)
-            best_actions = np.zeros((n,), dtype=np.int64)
-            for i, g in enumerate(self.games):
-                valid = g.get_valid_moves()
-                masked = np.where(valid, self._pols[i], -np.inf)
-                a = int(np.argmax(masked))
-                best_actions[i] = a
-                vc[i, a] = float(self.num_simulations)
-            q_vals = np.full((n, COLS), np.nan, dtype=np.float32)
-            return vc, best_actions, self._vals.copy(), q_vals
-
-    def fake_solve_batch_children_wdl(moves_list: list[str]) -> np.ndarray:
-        out = np.zeros((len(moves_list), COLS), dtype=np.int8)
-        out[:, 3] = 1
-        return out
-
-    monkeypatch.setattr(evaluate_mod, "RUST_MCTS_AVAILABLE", True)
-    monkeypatch.setattr(evaluate_mod, "RUST_SOLVER_AVAILABLE", True)
-    monkeypatch.setattr(evaluate_mod, "RustConnectFour", FakeRustConnectFour)
-    monkeypatch.setattr(evaluate_mod, "RustBatchedMCTS", FakeRustBatchedMCTS)
-    monkeypatch.setattr(
-        evaluate_mod, "solve_batch_children_wdl", fake_solve_batch_children_wdl
-    )
-
-    _MEMORY_SOLVER_CACHE.clear()
-    lines = ["44 2", "43 2"]
-    cw = get_dataset_child_wdl(lines, cache_dir=tmp_path)
-    assert cw is not None and cw.shape == (2, COLS)
-    assert len(list(tmp_path.glob("*.npz"))) == 1
-
-    spy1 = SpyPredictor(preferred_col=3, fixed_value=0.9)
-    spy2 = SpyPredictor(preferred_col=3, fixed_value=0.9)
-
-    res = evaluate_dataset(
-        spy1,  # type: ignore[arg-type]
-        torch.device("cpu"),
-        lines,
-        num_simulations=10,
-        child_wdl=cw,
-    )
-    assert res["wdl_accuracy"] == pytest.approx(100.0)
-    assert res["optimal_move_pct"] == pytest.approx(100.0)
-
-    move_op, pct_op = evaluate_opening_move(
-        spy1,  # type: ignore[arg-type]
-        torch.device("cpu"),
-        num_simulations=10,
-    )
-    assert move_op == 3
-    assert pct_op == pytest.approx(100.0)
-
-    arena_res = play_batched_arena(
-        spy1,
-        spy2,
-        torch.device("cpu"),
-        num_games=4,
-        num_simulations=8,
-        temperature=0.0,
-        paired_openings=True,
-    )
-    assert arena_res[0] + arena_res[1] == arena_res[2] + arena_res[3]
 

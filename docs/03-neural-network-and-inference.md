@@ -176,9 +176,9 @@ When you run `uv run play.py --hints --simulations 800` ([`play.py`](../play.py)
 5. After *every* move (human or AI), `mcts.advance_move(col)` reuses the searched child subtree for the next turn!
 
 ### Mode 3: High-Throughput Fused Batched Inference (`predict_packed`)
-During Rust batched self-play and dataset evaluation, Python↔Rust boundary overhead and PCIe transfers can easily rival the GPU compute time of a 3.2M-parameter network! `AlphaZeroNet.predict_packed` ([`src/model.py`](../src/model.py#L193-L222)) eliminates every redundant copy:
+During Cython batched self-play, Python↔C boundary overhead and PCIe transfers can easily rival the GPU compute time of a 3.2M-parameter network! `AlphaZeroNet.predict_packed` ([`src/model.py`](../src/model.py#L193-L222)) eliminates every redundant copy:
 - **Compact `uint8` Host-to-Device (H2D) Input**: Accepts `uint8[B, 3, 6, 7]` (`0` or `1` bytes—**4× smaller** PCIe transfer than `float32`) and converts `x = x.float()` directly on the GPU!
-- **Single Packed `float32[B, 8]` Device-to-Host (D2H) Output**: Concatenates `[policy_0..6, value]` on GPU into one contiguous `(B, 8)` tensor so only **one** D2H copy and **one** PyO3 slice borrow (`evals_packed`) occur per MCTS step instead of two separate arrays!
+- **Single Packed `float32[B, 8]` Device-to-Host (D2H) Output**: Concatenates `[policy_0..6, value]` on GPU into one contiguous `(B, 8)` tensor so only **one** D2H copy and **one** contiguous memoryview pass (`evals_packed`) occur per MCTS step instead of two separate arrays!
 
 ---
 

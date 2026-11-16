@@ -2,7 +2,7 @@
 
 > **Code references in this chapter**:
 > - Outer training loop & CLI flags: [`main.py`](../main.py)
-> - Self-play orchestration & symmetry augmentation: [`src/self_play.py`](../src/self_play.py), [`rust/src/batch_self_play.rs`](../rust/src/batch_self_play.rs)
+> - Self-play orchestration & symmetry augmentation: [`src/self_play.py`](../src/self_play.py)
 > - Contiguous ring buffer, recency sampler, WDL trainer & LR schedule: [`src/trainer.py`](../src/trainer.py)
 > - Multi-GPU Distributed Data Parallel (DDP): [`src/distributed.py`](../src/distributed.py)
 > - Atomic checkpoint & replay buffer persistence: [`src/utils.py`](../src/utils.py)
@@ -46,14 +46,14 @@ Generating good self-play data is a tug-of-war between **Exploration (Diversity)
 - If self-play is **too deterministic**, all 1,000 games play the exact same 2 or 3 main lines. The network memorizes a narrow tunnel and blunders immediately when a human plays an unusual column!
 - If self-play is **too random**, players make silly blunders on move 25, turning a won opening (`+1`) into a loss (`-1`) and corrupting the value labels $z_t$ of every earlier move in that game!
 
-`alphafour` balances both needs using four complementary mechanisms in [`src/self_play.py`](../src/self_play.py) and [`rust/src/batch_self_play.rs`](../rust/src/batch_self_play.rs):
+`alphafour` balances both needs using four complementary mechanisms in [`src/self_play.py`](../src/self_play.py):
 
 ### 2.1 Stochastic Opening Diversification (`RANDOM_OPENING_PLIES = 4`)
 Even with Dirichlet root noise and temperature $\tau = 1$, once the network learns that **Column 4** is the unique winning opening move for Player 1, center visits exceed 80–90%—meaning edge openings (`Col 1`, `Col 2`, `Col 6`, `Col 7`) rarely occur naturally.
 
 On the other hand, if *every* game started with 4 random moves, the network would **never train on the empty board (Move 0) or 1-stone board (Move 1)**!
 
-Look at how `_sample_opening_plies` ([`src/self_play.py`](../src/self_play.py#L110-L119)) and `sample_opening_game` ([`rust/src/batch_self_play.rs`](../rust/src/batch_self_play.rs#L51-L109)) sample each game's starting position:
+Look at how `_sample_opening_into_slot` ([`src/self_play.py`](../src/self_play.py)) samples each game's starting position:
 - **50% of games (`0` random plies)**: Start from the **empty board** so Moves 0 and 1 get heavy direct training.
 - **25% of games (`1` random ply)**: Start after 1 uniformly random legal column, guaranteeing equal exposure to all 7 first moves (`1..7`).
 - **25% of games (`2..=4` random plies)**: Start from a diverse 2-, 3-, or 4-stone board (rolling back/resampling if a random move ever hits an immediate terminal state, though impossible in $\le 4$ plies).
@@ -67,8 +67,8 @@ Look at how `_sample_opening_plies` ([`src/self_play.py`](../src/self_play.py#L1
 > Think about what happens after ply 10 when $\tau = 0$: `action_probs` becomes a **hard one-hot vector** `[0, 0, 1, 0, 0, 0, 0]`!
 > Suppose Column 3 had `305` visits and Column 4 had `295` visits because both moves are nearly equally strong. Training against one-hot `[0, 0, 1, 0, 0, 0, 0]` forces the network to crush Column 4's probability toward `0.0`—throwing away rich dark knowledge from 600 MCTS simulations!
 
-In `alphafour` (`compute_root_policy_target` in [`rust/src/batch_self_play.rs`](../rust/src/batch_self_play.rs#L450-L520) and `_play_batched_python` in [`src/self_play.py`](../src/self_play.py#L591-L632)), **the training policy target $\boldsymbol{\pi}_t$ is completely decoupled from move selection**:
-1. In the primary Rust self-play engine (`compute_root_policy_target`), if `root` is `ProvenWin`, $\boldsymbol{\pi}_t$ is **uniform over all proven-winning columns** (`child == ProvenLoss`).
+In `alphafour` (`_advance_single_slot` in [`src/self_play.py`](../src/self_play.py)), **the training policy target $\boldsymbol{\pi}_t$ is completely decoupled from move selection**:
+1. If `root` is `SOLVER_WIN`, $\boldsymbol{\pi}_t$ is **uniform over all proven-winning columns** (`child == SOLVER_LOSS`).
 2. Otherwise, any proven-losing moves (`child == ProvenWin`) are zeroed out into $N_{\text{safe}}$ (when a safe visited move exists), and $\boldsymbol{\pi}_t$ is **always the smooth normalized visit distribution**:
 
    $$
@@ -80,7 +80,7 @@ In `alphafour` (`compute_root_policy_target` in [`rust/src/batch_self_play.rs`](
 ### 2.4 Free $2\times$ Data via Horizontal Mirror Symmetry
 Connect Four rules are invariant under left-right reflection (`col c` $\leftrightarrow$ `col 6 - c`). Neither player parity nor gravity changes when you flip the board horizontally!
 
-Therefore, for **every** recorded state $(s_t, \boldsymbol{\pi}_t, z_t)$ in a finished game, `emit_mirrored_u8` ([`rust/src/batch_self_play.rs`](../rust/src/batch_self_play.rs#L559-L603)) and `augment_arrays` ([`src/self_play.py`](../src/self_play.py#L716-L737)) emit **two** examples:
+Therefore, for **every** recorded state $(s_t, \boldsymbol{\pi}_t, z_t)$ in a finished game, `_emit_slot_examples_c` and `augment_arrays` ([`src/self_play.py`](../src/self_play.py)) emit **two** examples:
 1. Original: `(s_t, π_t, z_t)`
 2. Mirrored: `(s_t[:, :, ::-1], π_t[::-1], z_t)`
 
@@ -207,7 +207,7 @@ Saving a 45 MB replay buffer *inside* every `checkpoint_0001.pt .. checkpoint_01
 
 ### 5.2 Multi-GPU Scaling via DDP ([`src/distributed.py`](../src/distributed.py))
 If your machine has multiple CUDA GPUs, `uv run main.py` automatically spawns one worker per GPU via `torch.multiprocessing.spawn` (or attaches directly under `torchrun --nproc_per_node=K main.py`):
-1. **CPU Thread Partitioning (`configure_rayon_threads`)**: Divides CPU cores evenly across ranks (`RAYON_NUM_THREADS = cpu_count // world_size`, `OMP_NUM_THREADS = 1`) *before* Rust initializes Rayon, preventing $K$ ranks from oversubscribing $K \times$ CPU threads!
+1. **CPU Thread Partitioning (`configure_omp_threads`)**: Divides CPU cores evenly across ranks (`OMP_NUM_THREADS = cpu_count // world_size`) for Cython OpenMP `prange`, preventing $K$ ranks from oversubscribing $K \times$ CPU threads!
 2. **Sharded Self-Play + Deterministic `all_gather`**: Each GPU generates `1000 // world_size` self-play games independently using distinct rank RNG seeds (`seed_rank`). `gather_self_play_arrays` then pads and `all_gather`s the compact `uint8` states, policies, and values across NCCL so **every rank's `ReplayBuffer` contains the exact same chronological history**.
 3. **DDP Training + BatchNorm Sync**: `DistributedDataParallel` averages gradients across GPUs on each mini-batch (`global_batch = 256 * world_size`, while scaling `effective_batches` down by `world_size` so total updates per epoch stay consistent), and broadcasts rank 0's BatchNorm running stats at the end of every epoch so self-play inference remains bit-identical across ranks!
 

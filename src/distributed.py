@@ -43,15 +43,14 @@ def get_comm_device(device: torch.device) -> torch.device:
     return torch.device("cpu")
 
 
-def configure_rayon_threads(world_size: int) -> int:
-    """Partition `RAYON_NUM_THREADS` evenly across `world_size` ranks before Rust initialization."""
+def configure_omp_threads(world_size: int) -> int:
+    """Partition `OMP_NUM_THREADS` evenly across `world_size` ranks for Cython OpenMP self-play."""
     ws = max(1, int(world_size))
     threads = max(1, (os.cpu_count() or 1) // ws)
     if ws > 1:
-        os.environ.setdefault("RAYON_NUM_THREADS", str(threads))
-        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("OMP_NUM_THREADS", str(threads))
         os.environ.setdefault("TORCHINDUCTOR_ONLINE_SOFTMAX", "0")
-    return int(os.environ.get("RAYON_NUM_THREADS", str(threads)))
+    return int(os.environ.get("OMP_NUM_THREADS", str(threads)))
 
 
 def seed_rank(base_seed: int, rank: int) -> None:

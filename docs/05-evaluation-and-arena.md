@@ -82,12 +82,12 @@ Compares predicted outcome $\hat{y}_i \in \{-1, 0, +1\}$ against `true_wdl = sig
 > **Subtle Engineering Lesson: Why MCTS Must Use `-best_child.q_value`, NEVER `root.q_value`!**
 > Suppose at a root position, Column 4 is a winning move (`-child_4.q_value = +0.92`, visited 340 times), while Columns 1..7 include 6 losing moves (`-child_k.q_value = -0.90`, visited 10 times each during PUCT exploration).
 > What is `root.q_value`? It is the **visit-weighted average of ALL simulations through the root**, including those 60 exploratory visits to losing moves (`(340*0.92 - 60*0.90)/400 = +0.64`)—and in narrower positions, exploration dilutes `root.q_value` below `+0.33`, misclassifying wins as draws!
-> Game-theoretic value of a state under best play is the value of its **best move**, not the average of good and bad moves! Both `BatchedMCTS::get_results` ([`rust/src/batch_mcts.rs`](../rust/src/batch_mcts.rs#L478-L491)) and `_run_python_batched_mcts` ([`src/evaluate.py`](../src/evaluate.py#L682-L693)) extract **undiluted `-best_child.q_value`** (or the exact MCTS-Solver proof value `±1.0` / `0.0`).
+> Game-theoretic value of a state under best play is the value of its **best move**, not the average of good and bad moves! `_run_python_batched_mcts` ([`src/evaluate.py`](../src/evaluate.py)) extracts **undiluted `-best_child.q_value`** (or the exact MCTS-Solver proof value `±1.0` / `0.0`).
 
 ### 3.3 Exact Move Optimality % & Blunder % (`get_dataset_child_wdl`)
 Notice that `gamesolver.org` lines only give the score of the *root* position—they don't list which of the 7 columns are optimal! (Often 2 or 3 columns all win or all hold a draw.)
 
-To grade *move selection* with 100% mathematical precision, `get_dataset_child_wdl` ([`src/evaluate.py`](../src/evaluate.py#L299-L419)) calls the Rust exact bitboard solver `solve_batch_children_wdl` ([`rust/src/solver.rs`](../rust/src/solver.rs#L616-L692)) to solve **all 7 child columns** of every benchmark position into an `int8[N, 7]` matrix:
+To grade *move selection* with 100% mathematical precision, `get_dataset_child_wdl` ([`src/evaluate.py`](../src/evaluate.py)) loads SHA256-cached `.npz` matrices from `testdata/.solver_cache/` (or runs the exact bounded-budget Pascal-Pons bitboard solver `_bb_solve_wdl`) to determine **all 7 child columns** of every benchmark position as an `int8[N, 7]` matrix:
 - `-2`: Illegal move (column is already full)
 - `-1`: Playing this column loses against best reply
 - `0`: Playing this column leads to a draw with best play
@@ -134,8 +134,8 @@ When batching 40 Arena games simultaneously on a GPU, it is tempting to evaluate
 
 At every ply of `play_batched_arena` ([`src/evaluate.py`](../src/evaluate.py#L1271-L1310)):
 1. Active games are partitioned into **`m1_turn_indices`** (boards where `model1` is to move) and **`m2_turn_indices`** (boards where `model2` is to move).
-2. A fresh `RustBatchedMCTS` runs `sims_m1` simulations on `m1_turn_indices` querying **only `model1`**.
-3. A separate `RustBatchedMCTS` runs `sims_m2` simulations on `m2_turn_indices` querying **only `model2`**.
+2. A fresh batched MCTS search runs `sims_m1` simulations on `m1_turn_indices` querying **only `model1`**.
+3. A separate batched MCTS search runs `sims_m2` simulations on `m2_turn_indices` querying **only `model2`**.
 
 ### Pitfall 2: Deterministic Collapse & First-Player Bias $\implies$ Duplicate Paired Openings
 In Connect Four:
@@ -201,10 +201,10 @@ you get a complete diagnostic table across all 6,000 positions at both `0` sims 
 2. **Undiluted `-best_child.q_value`**, **SHA256-cached exact child WDL (`Optimal Move %`, `Blunder %`)**, and **3-class WDL recall** pinpoint exact strengths and weaknesses across openings, midgames, and drawn endgames.
 3. **Model-Isolated Paired-Opening Arena** + **`PureMCTSBaseline` Anchor Elo** provide clean, color-balanced match ratings.
 
-There is one major piece of the puzzle left: **how can a single machine run ~12,000,000 MCTS simulations per iteration (`1,000` games $\times \sim 20$ moves $\times 600$ sims/move) in ~15 seconds AND solve 42,000 Connect Four positions to exact game-theoretic completion?** Let's look under the hood of the **Rust Engine (`alphafour_engine`) & Exact Bitboard Solver**!
+There is one major piece of the puzzle left: **how can a single machine run ~12,000,000 MCTS simulations per iteration (`1,000` games $\times \sim 20$ moves $\times 600$ sims/move) in seconds while remaining 100% valid Pure Python?** Let's look under the hood of the **Cython Engine (`src/self_play.py`) & Bitboard Solver**!
 
 ---
 
 ⬅️ **Previous**: **[Chapter 04: Self-Play Data Generation, Replay Buffer & Training Pipeline](./04-self-play-and-training.md)**  
-👉 **Next**: **[Chapter 06: High-Performance Rust Engine & Exact Bitboard Solver](./06-rust-engine-and-architecture.md)**  
+👉 **Next**: **[Chapter 06: High-Performance Cython Engine & Bitboard Solver](./06-cython-engine-and-architecture.md)**  
 🏠 **Back to Index**: **[AlphaFour Documentation Hub (`docs/README.md`)](./README.md)**

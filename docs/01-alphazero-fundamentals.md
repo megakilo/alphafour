@@ -2,7 +2,7 @@
 
 > **Code references in this chapter**:
 > - Python game rules & tensor encoding: [`src/game.py`](../src/game.py)
-> - Rust bitboard game rules & encoding: [`rust/src/game.rs`](../rust/src/game.rs)
+> - Cython bitboard game rules & encoding: [`src/self_play.py`](../src/self_play.py)
 
 ---
 
@@ -85,7 +85,7 @@ Let's trace what happens across iterations:
 
 ## 3. Connect Four as an AlphaZero Laboratory
 
-Before looking at code, let's review the exact game environment implemented in [`src/game.py`](../src/game.py) and [`rust/src/game.rs`](../rust/src/game.rs).
+Before looking at code, let's review the exact game environment implemented in [`src/game.py`](../src/game.py) and [`src/self_play.py`](../src/self_play.py).
 
 ### Rules & Board Geometry
 - **Grid**: `ROWS = 6` rows (`0` = bottom row, `5` = top row) $\times$ `COLS = 7` columns (`0` = leftmost, `6` = rightmost; displayed `1..7` in CLI).
@@ -108,9 +108,9 @@ Connect Four occupies a sweet spot in game complexity:
    | **0-indexed action** | `0` | `1` | `2` | **`3`** | `4` | `5` | `6` |
    | **Exact Game-Theoretic Outcome for P1** | **Loss (`-1`)** | **Loss (`-1`)** | **Draw (`0`)** | **Win (`+1`)** | **Draw (`0`)** | **Loss (`-1`)** | **Loss (`-1`)** |
 
-   *(See `EMPTY_BOARD_CHILDREN_WDL = [-1, -1, 0, 1, 0, -1, -1]` in [`rust/src/solver.rs`](../rust/src/solver.rs#L24).)*
+   *(Exact child W/D/L on the empty board: `[-1, -1, 0, 1, 0, -1, -1]`.)*
 
-   Because `alphafour` includes a fast Pascal-Pons exact bitboard solver ([`rust/src/solver.rs`](../rust/src/solver.rs)) and 6,000 exact positions from `gamesolver.org` ([`testdata/`](../testdata)), we don't have to guess whether our AlphaZero agent is playing well—we can measure its **exact move optimality %** and **exact blunder rate %**!
+   Because `alphafour` includes a Pascal-Pons exact bitboard solver ([`src/evaluate.py`](../src/evaluate.py)) and 6,000 exact positions from `gamesolver.org` ([`testdata/`](../testdata)), we don't have to guess whether our AlphaZero agent is playing well—we can measure its **exact move optimality %** and **exact blunder rate %**!
 
 ---
 
@@ -122,7 +122,7 @@ If you ever implement AlphaZero yourself, **90% of subtle bugs come from player 
 
 We do *not* train one network for Red (`+1`) and a second network for Yellow (`-1`). Instead, we train a **single** network that always views the board from the perspective of **`game.current_player`** (the player whose turn it is to move *right now*).
 
-Look at `ConnectFour.encode()` in [`src/game.py`](../src/game.py#L121-L134) (and `encode()` / `encode_u8()` in [`rust/src/game.rs`](../rust/src/game.rs#L202-L264)):
+Look at `ConnectFour.encode()` in [`src/game.py`](../src/game.py#L121-L134) (and `_encode_board_u8` in [`src/self_play.py`](../src/self_play.py)):
 
 ```python
 def get_canonical_board(self) -> np.ndarray:
@@ -190,7 +190,7 @@ Suppose a tiny game lasts 7 plies (`t = 0, 1, 2, 3, 4, 5, 6`), and **Player 1 wi
 | `5` | `-1` (Yellow) | Yellow's view | `[0.20, ..., 0.30, ...]` | Final `current_player = -1`, `result = -1.0` | **`-1.0`** |
 | `6` | `+1` (Red) | Red's view | `[0.00, 0.00, 0.00, 1.00, ...]` | Red plays winning stone $\to$ `current_player` flips to `-1` | **`+1.0`** |
 
-Look at how clean the value-assignment rule is in [`src/self_play.py`](../src/self_play.py#L649-L653) and [`rust/src/batch_self_play.rs`](../rust/src/batch_self_play.rs#L572-L577):
+Look at how clean the value-assignment rule is in [`src/self_play.py`](../src/self_play.py):
 
 ```python
 # At terminal state: `game.current_player` is the loser (-1), and `result` is -1.0 (or 0.0 for draw)

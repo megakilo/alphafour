@@ -2,7 +2,7 @@
 
 > **Code references in this chapter**:
 > - Pure-Python reference implementation (clarity + interactive play): [`src/mcts.py`](../src/mcts.py)
-> - Rust arena-allocated implementation (speed + parallel batching): [`rust/src/mcts.rs`](../rust/src/mcts.rs)
+> - Cython arena-allocated implementation (speed + parallel batching): [`src/self_play.py`](../src/self_play.py)
 
 ---
 
@@ -22,20 +22,20 @@ At the same time, pure averaging has a weakness of its own in tactical games lik
 
 Every node in the search tree represents a specific board state `game` and stores statistics accumulated across all simulations that passed through it.
 
-Compare `MCTSNode` in [`src/mcts.py`](../src/mcts.py#L26-L72) and [`rust/src/mcts.rs`](../rust/src/mcts.rs#L94-L107):
+Compare `MCTSNode` in [`src/mcts.py`](../src/mcts.py#L26-L72) and [`src/self_play.py`](../src/self_play.py):
 
 | Field | Math Symbol | Perspective | Meaning |
 | :--- | :---: | :--- | :--- |
 | `game` | $s$ | `s.current_player` | Exact `ConnectFour` board state at this node |
-| `parent` | $\text{parent}(s)$ | Opponent | Pointer (Python) or arena index `Option<usize>` (Rust) to parent node |
-| `children` | $\{a \mapsto s'\}$ | Opponent | Map / inline list of legal column moves `0..6` to child nodes |
+| `parent` | $\text{parent}(s)$ | Opponent | Pointer (Python) or C-struct arena index `cython.int` (`-1` at root) to parent node |
+| `children` | $\{a \mapsto s'\}$ | Opponent | Map / contiguous sibling range (`first_child`, `num_children`) of legal column moves `0..6` |
 | `prior` | $P(\text{parent}, a)$ | Parent's move prob | Neural network policy probability assigned to the move $a$ that led to this node |
 | `visit_count` | $N(s)$ | — | Number of simulations that have passed through this node |
 | `total_value` | $W(s)$ | **`s.current_player`** | Sum of backpropagated leaf evaluations from this node's mover's perspective |
 | `q_value` | $Q(s) = \frac{W(s)}{N(s)}$ | **`s.current_player`** | Mean expected outcome in $[-1, +1]$ for the player *about to move at this node* |
 | `is_expanded` | — | — | `True` once legal children have been instantiated with neural network priors |
 | `solver_state` | — | **`s.current_player`** | Exact game-theoretic proof status: `Ongoing`, `Win (+1)`, `Loss (-1)`, or `Draw (0)` |
-| `virtual_losses` | $N_{\text{vl}}(s)$ | — | *(Rust only)* In-flight parallel traversals currently evaluating a leaf under this node |
+| `virtual_losses` | $N_{\text{vl}}(s)$ | — | *(Cython self-play)* In-flight parallel traversals currently evaluating a leaf under this node |
 
 > **Watch the Perspective of `q_value`!**
 > In `alphafour`, a child node stores `total_value` and `q_value` from **its own `current_player`'s perspective**—which is the **opponent** of the parent node choosing among its children!
@@ -87,7 +87,7 @@ Once selection stops at a leaf node $s_L$:
    - Instantiate a child `MCTSNode` for each legal column $c$ with `prior = p[c]`. (Each child constructor immediately checks `child_game.get_result()`—so if any child is an instant 4-in-a-row win, that child is born with `SOLVER_LOSS`, and `_propagate_solver()` immediately marks $s_L$ as `SOLVER_WIN`!)
    - Choose backpropagated value `bval`: if expansion just proved $s_L$'s exact `solver_state`, use the exact proven value (`±1.0` or `0.0`) instead of the noisy network estimate $v$! Otherwise use $v$.
 
-*(Note: That subtle rule—overriding `value` with `proven_val` on the exact simulation when `expand()` discovers a 1-ply mate—prevents a single inaccurate neural value from polluting ancestor Q-values! See [`src/mcts.py`](../src/mcts.py#L400-L409) in Python, plus `MCTSTree::expand` in [`rust/src/mcts.rs`](../rust/src/mcts.rs#L358-L400) paired with `solver_state.proven_value().unwrap_or(...)` in [`rust/src/batch_self_play.rs`](../rust/src/batch_self_play.rs#L432-L437) and [`rust/src/batch_mcts.rs`](../rust/src/batch_mcts.rs#L247-L252).)*
+*(Note: That subtle rule—overriding `value` with `proven_val` on the exact simulation when `expand()` discovers a 1-ply mate—prevents a single inaccurate neural value from polluting ancestor Q-values! See [`src/mcts.py`](../src/mcts.py#L400-L409) and [`src/self_play.py`](../src/self_play.py).)*
 
 ### Phase 4: Backpropagation
 
@@ -162,7 +162,7 @@ Suppose Red is in a tough defensive position at node $s$:
 
 Instead of assuming an unvisited move has value `0.0` (a draw), **Parent-Relative FPU Reduction** assumes an unvisited move is **slightly worse than the parent node's own current value $Q(s)$**, scaled by how much policy mass we have already explored!
 
-Here is the exact formula implemented in `MCTSNode._unvisited_fpu_value` ([`src/mcts.py`](../src/mcts.py#L74-L90)) and `MCTSTree::best_child` ([`rust/src/mcts.rs`](../rust/src/mcts.rs#L184-L202)):
+Here is the exact formula implemented in `MCTSNode._unvisited_fpu_value` ([`src/mcts.py`](../src/mcts.py#L74-L90)) and `_best_child` ([`src/self_play.py`](../src/self_play.py)):
 
 $$
 U_{\text{FPU}}(s) = \text{clamp}\!\left(Q(s) - c_{\text{fpu}} \sqrt{\sum_{b:\, N(s,b) > 0} P(s, b)},\; -1.0,\; +1.0\right)
@@ -186,7 +186,7 @@ with default `DEFAULT_C_FPU = 0.20`:
 
 During self-play training, if MCTS always trusted the neural network's current priors $P(s_{\text{root}}, a)$, the network could fall into a **self-confirming blind spot**: if it initially assigns $P(\text{Col 3}) = 0.001$, MCTS might rarely visit Column 3, so Column 3 never gets discovered even if it is strong.
 
-To guarantee breadth at the root of every self-play turn, AlphaZero mixes the root's priors with random samples from a symmetric **Dirichlet distribution** ([`src/mcts.py`](../src/mcts.py#L347-L359), [`rust/src/mcts.rs`](../rust/src/mcts.rs#L413-L439)):
+To guarantee breadth at the root of every self-play turn, AlphaZero mixes the root's priors with random samples from a symmetric **Dirichlet distribution** ([`src/mcts.py`](../src/mcts.py#L347-L359), [`src/self_play.py`](../src/self_play.py)):
 
 $$
 \tilde{P}(s_{\text{root}}, a_i) = (1 - \varepsilon) P(s_{\text{root}}, a_i) + \varepsilon \eta_i, \qquad (\eta_1, \dots, \eta_K) \sim \text{Dir}(\alpha, \dots, \alpha)
@@ -212,14 +212,14 @@ Standard MCTS only tracks statistical averages ($N$ and $Q$). In tactical games 
 1. Suppose at depth 2, MCTS expands all 7 of the opponent's replies to move $a$ and discovers that **every single reply gives us an immediate 4-in-a-row win**. Mathematically, move $a$ is now **100% proven to force a win**—yet standard MCTS would keep spending hundreds of redundant simulations re-visiting that already-solved subtree!
 2. Worse, suppose at the root we discover move $b$ allows a forced 2-move mate against us. Standard MCTS only lowers $-Q(b)$ gradually with each visit, and if temperature sampling ($\tau = 1$) is active, a move with even 3 visits out of 600 has a $0.5\%$ chance of blundering a forced mate!
 
-`alphafour` implements **MCTS-Solver** (Winands, Björnsson & Saito, 2008), tracking a 4-state exact game-theoretic status `solver_state` on every node from `node.game.current_player`'s perspective ([`src/mcts.py`](../src/mcts.py#L16-L20), [`rust/src/mcts.rs`](../rust/src/mcts.rs#L15-L42)):
+`alphafour` implements **MCTS-Solver** (Winands, Björnsson & Saito, 2008), tracking a 4-state exact game-theoretic status `solver_state` on every node from `node.game.current_player`'s perspective ([`src/mcts.py`](../src/mcts.py#L16-L20), [`src/self_play.py`](../src/self_play.py)):
 
-| Python Constant | Rust Enum | Value (Node Mover's View) | Meaning |
-| :--- | :--- | :---: | :--- |
-| `SOLVER_ONGOING` (`0`) | `SolverState::Ongoing` | Unknown | Subtree not yet game-theoretically solved |
-| `SOLVER_WIN` (`1`) | `SolverState::ProvenWin` | `+1.0` | Current player at this node has a **proven forced win** |
-| `SOLVER_LOSS` (`-1`) | `SolverState::ProvenLoss` | `-1.0` | Current player at this node is **proven lost** against best play |
-| `SOLVER_DRAW` (`2`) | `SolverState::ProvenDraw` | `0.0` | Best play from both sides at this node is a **proven draw** |
+| Constant | Integer Code | Value (Node Mover's View) | Meaning |
+| :--- | :---: | :---: | :--- |
+| `SOLVER_ONGOING` | `0` | Unknown | Subtree not yet game-theoretically solved |
+| `SOLVER_WIN` | `1` | `+1.0` | Current player at this node has a **proven forced win** |
+| `SOLVER_LOSS` | `-1` | `-1.0` | Current player at this node is **proven lost** against best play |
+| `SOLVER_DRAW` | `2` | `0.0` | Best play from both sides at this node is a **proven draw** |
 
 ### 6.1 Exact Minimax Upward Propagation Rules
 
@@ -248,7 +248,7 @@ Propagation continues upward (`p = p.parent`) until a parent remains `Ongoing` o
    - Filter out any `ProvenWin` children (proven losing moves for the parent) so MCTS **never wastes another simulation** exploring a known losing move (unless *all* moves are `ProvenWin`).
 2. **Short-Circuiting Subtrees**:
    - Selection stops immediately upon reaching any solved node (`solver_state != Ongoing`) and backpropagates its exact value (`+1.0`, `-1.0`, or `0.0`) with **zero GPU calls**.
-   - In Rust (`BatchedSelfPlay` / `BatchedMCTS`), as soon as `root.solver_state != Ongoing`, that game marks `sims_done = num_simulations` and finishes its turn early!
+   - In `CythonBatchedSelfPlay` ([`src/self_play.py`](../src/self_play.py)), as soon as `root.solver_state != SOLVER_ONGOING`, that game slot marks `sims_done = num_simulations` and finishes its turn early!
 3. **Blunder-Proof Root Visit Extraction**:
    - If `root` is `ProvenWin`, non-winning moves are zeroed out so the agent *only* plays a proven winning column.
    - If `root` is `Ongoing` or `ProvenDraw`, any move proven to lose (`child.solver_state == ProvenWin`) has its selection count zeroed out whenever at least one non-losing move exists.
@@ -281,7 +281,7 @@ Suppose MCTS runs 600 simulations at turn $t$, putting 350 visits into Column 4,
 
 Throwing that subtree away on turn $t+1$ would waste $>50\%$ of the work we just did. Both engines reuse subtrees:
 - **Python (`MCTS.advance_move(col)` in [`src/mcts.py`](../src/mcts.py#L292-L299))**: Used interactively in [`play.py`](../play.py#L288-L294) after *both* human moves and AI moves! Detaches `self._root = self._root.children[col]`, sets `parent = None`, and runs only the remaining `num_simulations - existing_sims` needed to top the tree back up to budget (while discarding the tree if `_root_noisy` was true and a clean noiseless search is requested).
-- **Rust (`MCTSTree::rebase(child_idx)` in [`rust/src/mcts.rs`](../rust/src/mcts.rs#L459-L499))**: Performs a fast contiguous BFS compaction of the chosen child's subtree into `new_nodes[0..]` during batched self-play, preserving `visit_count`, `total_value`, `prior`, `is_expanded`, and `solver_state`! *(Note: in self-play, `sims_done` resets to `0` on the new turn so every turn still receives `num_simulations` fresh lookahead simulations on top of the inherited subtree!)*
+- **Cython (`_rebase_tree` in [`src/self_play.py`](../src/self_play.py))**: Performs a fast contiguous BFS compaction of the chosen child's subtree into `scratch_nodes[0..]` and swaps the arena pointers during batched self-play, preserving `visit_count`, `total_value`, `prior`, `is_expanded`, and `solver_state`! *(Note: in self-play, `sims_done` resets to `0` on the new turn so every turn still receives `num_simulations` fresh lookahead simulations on top of the inherited subtree!)*
 
 ---
 

@@ -3,8 +3,9 @@
 > **Code references in this chapter**:
 > - Training CLI: [`main.py`](../main.py)
 > - Benchmark & Arena CLI: [`benchmark.py`](../benchmark.py)
+> - Self-play Throughput Benchmark CLI: [`benchmark_selfplay.py`](../benchmark_selfplay.py)
 > - Interactive Play CLI: [`play.py`](../play.py)
-> - PyO3 Rust module exports: [`rust/src/lib.rs`](../rust/src/lib.rs)
+> - Cython OpenMP build script: [`setup_cython.py`](../setup_cython.py)
 
 ---
 
@@ -17,11 +18,11 @@ One of the hardest parts of learning AlphaZero is knowing *why* each hyperparame
 | Parameter | Default | Location | If Set Too Low | If Set Too High |
 | :--- | :---: | :--- | :--- | :--- |
 | **`training_simulations`** | `600` | `main.py` | Search looks too shallow; MCTS "teacher" fails to spot multi-move tactics, slowing down or capping peak Elo. | Linearly increases self-play wall-clock time per iteration with diminishing per-move policy improvement beyond ~800–1,200 sims in Connect Four. |
-| **`c_puct`** | `1.5` | `src/mcts.py`, `rust/src/mcts.rs` | Over-exploits the first move with a decent Q-value; misses better alternative columns whose initial network prior was modest. | Spreads simulations too thinly across weak moves instead of searching deep enough along the critical tactical line. |
-| **`c_fpu`** | `0.20` | `src/mcts.py`, `rust/src/mcts.rs` | (`0.0`): In losing positions, unvisited moves look artificially better than the best defence, distracting search onto garbage moves. | (`> 0.6`): Unvisited moves are penalized so harshly that MCTS locks onto the very first child visited and ignores viable sibling moves. |
+| **`c_puct`** | `1.5` | `src/mcts.py`, `src/self_play.py` | Over-exploits the first move with a decent Q-value; misses better alternative columns whose initial network prior was modest. | Spreads simulations too thinly across weak moves instead of searching deep enough along the critical tactical line. |
+| **`c_fpu`** | `0.20` | `src/mcts.py`, `src/self_play.py` | (`0.0`): In losing positions, unvisited moves look artificially better than the best defence, distracting search onto garbage moves. | (`> 0.6`): Unvisited moves are penalized so harshly that MCTS locks onto the very first child visited and ignores viable sibling moves. |
 | **`dirichlet_alpha`** | `0.35` | `src/mcts.py`, `src/self_play.py` | (`< 0.05`): Puts almost 100% of the noise spike onto a single random column. | (`> 2.0`): Noise approaches a flat `[1/7, ..., 1/7]` uniform blur that barely boosts any single overlooked move. |
 | **`dirichlet_epsilon`** | `0.25` | `src/self_play.py` | (`0.0`): Root relies strictly on existing priors; risks tunnel vision on narrow openings. | (`> 0.50`): Root priors become mostly random noise, polluting the visit-count policy target $\boldsymbol{\pi}_t$. |
-| **`LEAVES_PER_GAME`** | `16` | `rust/src/batch_self_play.rs` | Small GPU batch sizes $\implies$ lower GPU utilization and more Python↔Rust round-trips. | Excessive virtual-loss distortion: selecting 64+ leaves at once from a small Connect Four tree forces traversals down unrealistic blunders. |
+| **`LEAVES_PER_GAME`** | `16` | `src/self_play.py` | Small GPU batch sizes $\implies$ lower GPU utilization and more Python↔C round-trips. | Excessive virtual-loss distortion: selecting 64+ leaves at once from a small Connect Four tree forces traversals down unrealistic blunders. |
 
 ### 1.2 Self-Play & Replay Buffer Hyperparameters
 
@@ -150,47 +151,36 @@ uv run play.py --computer-first --hints --simulations 800
 
 ## 4. Troubleshooting & Performance Checklist
 
-1. **Self-play feels slow on CPU / Rust engine isn't active**:
-   Check whether `alphafour_engine` imported cleanly:
+1. **Self-play feels slow on CPU / Cython extension isn't compiled**:
+   Check whether `src.self_play` is running compiled native C + OpenMP:
    ```bash
-   uv run python -c "import src.self_play as sp; print('RUST_AVAILABLE =', sp.RUST_AVAILABLE)"
+   uv run python -c "import src.self_play as sp; print('is_cython_compiled =', sp.is_cython_compiled())"
    ```
-   If `False`, run `uv sync` to build and install the `rust/` PyO3 crate in release mode.
+   If `False`, run `uv run python setup_cython.py build_ext --inplace` to compile `src/self_play.py` in-place.
 2. **First iteration pauses for 10–25 seconds on CUDA**:
    That one-time pause is TorchInductor compiling the dynamic `NHWC` BF16 Triton kernels (`--compile` is enabled by default). Pass `--no-compile` during quick 1-iteration debugging runs if you want instant startup.
-3. **First `benchmark.py` run takes ~5–15 seconds before printing tables**:
-   `get_dataset_child_wdl` is solving all 42,000 child positions of `testdata/Test_*` via the exact Rust bitboard solver and writing `testdata/.solver_cache/*.npz`. Every subsequent run loads from disk cache in `< 5 ms`!
+3. **Solver ground-truth cache (`testdata/.solver_cache/`)**:
+   `get_dataset_child_wdl` caches SHA256 `.npz` child W/D/L matrices in `testdata/.solver_cache/` so dataset optimality and blunder evaluation loads from disk in `< 5 ms`.
 
 ---
 
 ## 5. Module & API Quick Reference
 
-### Python Package (`src/`)
+### Python & Cython Package (`src/`)
 
 | Symbol | Signature / Input → Output | Purpose |
 | :--- | :--- | :--- |
 | `ConnectFour` (`src.game`) | `.encode() -> float32[3, 6, 7]`<br>`.get_valid_moves() -> bool[7]`<br>`.get_result() -> {-1.0, 0.0, None}` | Canonical Python Connect Four board (`current_player ∈ {+1, -1}`). |
 | `AlphaZeroNet` (`src.model`) | `forward(x: [B,3,6,7]) -> (logits[B,7], wdl[B,3])`<br>`predict_wdl(s, mask) -> (pol, wdl_probs, val)`<br>`predict_packed(s_u8, mask) -> float32[B, 8]` | SE-ResNet with 32-ch policy head and 16-ch `[Loss, Draw, Win]` value head (`val = P(Win) - P(Loss)`). |
 | `MCTS` (`src.mcts`) | `.search_with_values(game, add_noise)`<br>`.get_action_probs(game, temperature, add_noise)`<br>`.advance_move(col)` / `.reset()` | Single-game Python MCTS-Solver with FPU reduction and subtree reuse across turns. |
+| `CythonBatchedSelfPlay` (`src.self_play`) | `.collect_continuous_u8()`<br>`.apply_continuous_packed(packed)`<br>`.take_completed_u8()` / `.take_completed_f32()` | OpenMP-parallel Cython Pure Python Mode batched MCTS-Solver self-play engine. |
 | `run_self_play` (`src.self_play`) | `(model, num_games, num_simulations, ..., return_arrays=True, return_uint8=True)` | Runs batched self-play + $2\times$ mirror augmentation, returning `(states, policies, values)`. |
 | `ReplayBuffer` (`src.trainer`) | `.add_batch(s, p, v)`<br>`.sample_tensors(B, device) -> (s, p, v)` | Preallocated `uint8` circular buffer with $O(B)$ analytical 2:1 recency sampling. |
 | `Trainer` (`src.trainer`) | `.train_epoch(replay_buffer, num_batches)`<br>`.step_scheduler()` / `.restore_scheduler(...)` | BF16/FP16 AMP + DDP + `torch.compile` trainer with AdamW and Warmup+Cosine LR. |
 | `evaluate_dataset` (`src.evaluate`) | `(model, device, lines, num_simulations, child_wdl)` | Computes WDL accuracy, Win/Draw/Loss recall, Optimal Move %, Blunder %, and Value MSE. |
 | `play_batched_arena` (`src.evaluate`) | `(model1, model2, device, num_games, num_simulations, ...)` | Strictly model-isolated duplicate Paired-Opening head-to-head Arena. |
 
-### Rust Extension (`alphafour_engine`)
-
-| Exported Symbol | Signature / Role |
-| :--- | :--- |
-| `RustConnectFour` | 49-bit bitboard Connect Four (`new()`, `from_moves(str)`, `make_move(col)`, `get_valid_moves()`, `get_result()`, `encode()`, `copy()`). |
-| `batch_encode` / `batch_valid_moves` | `(games: list[RustConnectFour]) -> float32[N, 3, 6, 7]` / `bool[N, 7]` vectorized board & legal-move encoders. |
-| `RustBatchedSelfPlay` | Rayon-parallel self-play engine supporting barrier-free `collect_continuous_u8()` + `apply_continuous_packed()` + `take_completed_u8()`. |
-| `RustBatchedMCTS` | Rayon-parallel evaluation search engine (`get_root_states_u8()`, `init_roots()`, `collect_leaves_u8()`, `apply_evaluations_packed()`, `get_results()`). |
-| `solve_position_wdl` | `(moves_str: str) -> int` (`-1`, `0`, `+1` from current mover's view). |
-| `solve_children_wdl` | `(moves_str: str) -> list[int]` (`7` entries: `-2` full, `-1` loss, `0` draw, `+1` win from root mover's view). |
-| `solve_batch_children_wdl` | `(moves_list: list[str], max_nodes: int | None = None) -> int8[N, 7]` parallelized across Rayon + shared 128 MiB lock-free TT. |
-
 ---
 
-⬅️ **Previous**: **[Chapter 06: High-Performance Rust Engine & Exact Bitboard Solver](./06-rust-engine-and-architecture.md)**  
+⬅️ **Previous**: **[Chapter 06: High-Performance Cython Engine & Bitboard Solver](./06-cython-engine-and-architecture.md)**  
 🏠 **Back to Index**: **[AlphaFour Documentation Hub (`docs/README.md`)](./README.md)**

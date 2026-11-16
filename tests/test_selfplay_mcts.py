@@ -27,9 +27,9 @@ from src.model import AlphaZeroNet
 from src.self_play import (
     RANDOM_OPENING_PLIES,
     TEMP_THRESHOLD,
-    _create_opening_game,
-    _play_batched_python,
-    _play_batched_rust,
+    augment_arrays,
+    augment_examples,
+    play_batched_games,
     run_self_play,
 )
 
@@ -467,16 +467,15 @@ class TestSelfPlay:
             captured.update(kwargs)
             if kwargs.get("return_arrays"):
                 return (
-                    np.zeros((2, 3, ROWS, COLS), dtype=np.float32),
-                    np.full((2, COLS), 1.0 / COLS, dtype=np.float32),
-                    np.array([1.0, -1.0], dtype=np.float32),
+                    np.zeros((4, 3, ROWS, COLS), dtype=np.float32),
+                    np.full((4, COLS), 1.0 / COLS, dtype=np.float32),
+                    np.array([1.0, 1.0, -1.0, -1.0], dtype=np.float32),
                 )
             return []
 
         dummy = DummyModel()
-        with (
-            patch.object(self_play, "RUST_AVAILABLE", False),
-            patch.object(self_play, "play_batched_games", side_effect=fake_play_batched_games),
+        with patch.object(
+            self_play, "play_batched_games", side_effect=fake_play_batched_games
         ):
             states, policies, values = run_self_play(
                 model=dummy,  # type: ignore[arg-type]
@@ -489,6 +488,7 @@ class TestSelfPlay:
                 random_opening_plies=5,
                 c_fpu=0.18,
                 return_arrays=True,
+                return_uint8=False,
             )
 
         assert captured["num_games"] == 6
@@ -500,6 +500,7 @@ class TestSelfPlay:
         assert captured["random_opening_plies"] == 5
         assert captured["c_fpu"] == 0.18
         assert captured["return_arrays"] is True
+        assert captured["return_uint8"] is False
 
         assert states.shape == (4, 3, ROWS, COLS)
         assert policies.shape == (4, COLS)
@@ -508,37 +509,50 @@ class TestSelfPlay:
         assert policies.dtype == np.float32 and policies.flags["C_CONTIGUOUS"]
         assert values.dtype == np.float32 and values.flags["C_CONTIGUOUS"]
 
-    def test_opening_ply_distribution_covers_move_0_and_move_1_and_rolls_back_terminal(
-        self,
-    ):
-        np.random.seed(12345)
-        move_counts = [_create_opening_game(4)._move_count for _ in range(400)]
-        count_0 = sum(1 for m in move_counts if m == 0)
-        count_1 = sum(1 for m in move_counts if m == 1)
-        count_2_to_4 = sum(1 for m in move_counts if 2 <= m <= 4)
+    def test_augment_helpers_and_opening_rollback_safety(self):
+        st = np.zeros((2, 3, ROWS, COLS), dtype=np.float32)
+        st[0, 0, 0, 1] = 1.0
+        pol = np.zeros((2, COLS), dtype=np.float32)
+        pol[:, 1] = 1.0
+        val = np.array([1.0, -1.0], dtype=np.float32)
 
-        assert 150 <= count_0 <= 250
-        assert 65 <= count_1 <= 135
-        assert 65 <= count_2_to_4 <= 135
+        aug_s, aug_p, aug_v = augment_arrays(st, pol, val)
+        assert aug_s.shape == (4, 3, ROWS, COLS)
+        assert aug_s[2, 0, 0, COLS - 2] == 1.0
+        assert aug_p[2, COLS - 2] == 1.0
+        npt.assert_array_equal(aug_v, np.array([1.0, -1.0, 1.0, -1.0], dtype=np.float32))
 
-        for _ in range(50):
-            g = _create_opening_game(24)
-            assert not g.is_terminal()
+        ex_aug = augment_examples([(st[0], pol[0], 1.0)])
+        assert len(ex_aug) == 2
+        assert ex_aug[1][0][0, 0, COLS - 2] == 1.0
+        assert ex_aug[1][1][COLS - 2] == 1.0
 
-    def test_python_self_play_return_arrays_and_move0_move1_coverage(self):
+        # Large random_opening_plies must still produce valid non-empty self-play trajectories
+        dummy = DummyModel()
+        s_deep, p_deep, v_deep = run_self_play(
+            model=dummy,  # type: ignore[arg-type]
+            num_games=20,
+            num_simulations=4,
+            random_opening_plies=24,
+            return_arrays=True,
+        )
+        assert len(s_deep) >= 40
+        npt.assert_allclose(p_deep.sum(axis=1), 1.0, atol=1e-5)
+        assert np.all(np.isin(v_deep, np.array([-1.0, 0.0, 1.0], dtype=np.float32)))
+
+    def test_self_play_return_arrays_and_move0_move1_coverage(self):
         np.random.seed(7)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = AlphaZeroNet(num_res_blocks=1, num_filters=16).to(device)
         model.eval()
 
-        with patch.object(self_play, "RUST_AVAILABLE", False):
-            states, policies, values = run_self_play(
-                model=model,
-                num_games=16,
-                num_simulations=6,
-                random_opening_plies=4,
-                return_arrays=True,
-            )
+        states, policies, values = run_self_play(
+            model=model,
+            num_games=24,
+            num_simulations=6,
+            random_opening_plies=4,
+            return_arrays=True,
+        )
 
         assert isinstance(states, np.ndarray)
         assert states.ndim == 4 and states.shape[1:] == (3, ROWS, COLS)
@@ -554,14 +568,13 @@ class TestSelfPlay:
         assert np.any(piece_counts == 1), "Expected Move 1 (1-stone board) examples"
         npt.assert_allclose(policies.sum(axis=1), 1.0, atol=1e-5)
 
-        with patch.object(self_play, "RUST_AVAILABLE", False):
-            examples = run_self_play(
-                model=model,
-                num_games=2,
-                num_simulations=4,
-                random_opening_plies=2,
-                return_arrays=False,
-            )
+        examples = run_self_play(
+            model=model,
+            num_games=2,
+            num_simulations=4,
+            random_opening_plies=2,
+            return_arrays=False,
+        )
         assert isinstance(examples, list) and len(examples) > 0
         s0, p0, v0 = examples[0]
         assert s0.shape == (3, ROWS, COLS)
@@ -572,7 +585,7 @@ class TestSelfPlay:
         np.random.seed(99)
         dummy = DummyModel(priors=[0.12, 0.14, 0.16, 0.16, 0.16, 0.14, 0.12])
 
-        states, policies, _ = _play_batched_python(
+        states, policies, _ = play_batched_games(
             model=dummy,  # type: ignore[arg-type]
             num_games=3,
             num_simulations=14,
@@ -580,116 +593,9 @@ class TestSelfPlay:
             random_opening_plies=0,
             return_arrays=True,
         )
-        assert len(policies) > 0
+        assert len(states) > 0 and len(policies) > 0
         npt.assert_allclose(policies.sum(axis=1), 1.0, atol=1e-5)
         non_one_hot = np.sum(policies > 0.0, axis=1) > 1
         assert np.any(non_one_hot), (
             "Policy targets should be smooth visit distributions, not forced one-hot at >= temp_threshold"
         )
-
-    def test_rust_batched_loop_uses_is_step_done_and_skips_zero_unexpanded_roots(self):
-        class FakeRustEngine:
-            instances: list[FakeRustEngine] = []
-
-            def __init__(
-                self,
-                num_games,
-                num_simulations,
-                c_puct,
-                dirichlet_alpha,
-                dirichlet_epsilon,
-                temp_threshold,
-                random_opening_plies,
-                c_fpu,
-            ):
-                self.num_games = num_games
-                self.num_simulations = num_simulations
-                self.c_fpu = c_fpu
-                self.ply = 0
-                self.sims_done = 0
-                self.collect_calls_per_ply: list[int] = []
-                self._cur_collect_calls = 0
-                self.init_unexpanded_calls = 0
-                FakeRustEngine.instances.append(self)
-
-            def num_active(self) -> int:
-                return self.num_games if self.ply < 2 else 0
-
-            def is_done(self) -> bool:
-                return self.ply >= 2
-
-            def get_unexpanded_root_states(self):
-                if self.ply == 0:
-                    return (
-                        np.zeros((self.num_games, 3, ROWS, COLS), dtype=np.float32),
-                        np.ones((self.num_games, COLS), dtype=bool),
-                        self.num_games,
-                    )
-                return (
-                    np.zeros((0, 3, ROWS, COLS), dtype=np.float32),
-                    np.ones((0, COLS), dtype=bool),
-                    0,
-                )
-
-            def init_unexpanded_roots(self, policies: np.ndarray) -> None:
-                assert policies.flags["C_CONTIGUOUS"] and policies.dtype == np.float32
-                self.init_unexpanded_calls += 1
-
-            def add_noise(self) -> None:
-                self.sims_done = 0
-                self._cur_collect_calls = 0
-
-            def is_step_done(self) -> bool:
-                return self.sims_done >= self.num_simulations
-
-            def collect_leaves(self):
-                self._cur_collect_calls += 1
-                step = min(4, self.num_simulations - self.sims_done)
-                self.sims_done += step
-                return (
-                    np.zeros((step, 3, ROWS, COLS), dtype=np.float32),
-                    np.ones((step, COLS), dtype=bool),
-                    step,
-                )
-
-            def apply_evaluations(self, policies: np.ndarray, values: np.ndarray) -> None:
-                assert policies.flags["C_CONTIGUOUS"] and policies.dtype == np.float32
-                assert values.flags["C_CONTIGUOUS"] and values.dtype == np.float32
-
-            def advance_games(self):
-                self.collect_calls_per_ply.append(self._cur_collect_calls)
-                self.ply += 1
-                if self.ply == 2:
-                    return (
-                        np.zeros((4, 3, ROWS, COLS), dtype=np.float32),
-                        np.full((4, COLS), 1.0 / COLS, dtype=np.float32),
-                        np.array([1.0, 1.0, -1.0, -1.0], dtype=np.float32),
-                    )
-                return (
-                    np.empty((0, 3, ROWS, COLS), dtype=np.float32),
-                    np.empty((0, COLS), dtype=np.float32),
-                    np.empty((0,), dtype=np.float32),
-                )
-
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dummy = DummyModel(device=device)
-
-        with (
-            patch.object(self_play, "RUST_AVAILABLE", True),
-            patch.object(self_play, "RustBatchedSelfPlay", FakeRustEngine, create=True),
-        ):
-            states, policies, values = _play_batched_rust(
-                model=dummy,  # type: ignore[arg-type]
-                num_games=2,
-                num_simulations=20,
-                c_fpu=0.20,
-                return_arrays=True,
-            )
-
-        eng = FakeRustEngine.instances[-1]
-        assert eng.collect_calls_per_ply == [5, 5]
-        assert eng.init_unexpanded_calls == 1
-        assert dummy.eval_calls == 11
-        assert states.shape == (4, 3, ROWS, COLS)
-        assert policies.shape == (4, COLS)
-        assert values.shape == (4,)

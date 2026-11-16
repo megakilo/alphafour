@@ -28,28 +28,6 @@ from .mcts import MCTSNode
 if TYPE_CHECKING:
     from .model import AlphaZeroNet
 
-try:
-    import alphafour_engine as _rust_engine
-
-    RustConnectFour = getattr(_rust_engine, "RustConnectFour", None)
-    RustBatchedMCTS = getattr(_rust_engine, "RustBatchedMCTS", None)
-    solve_position_wdl = getattr(_rust_engine, "solve_position_wdl", None)
-    solve_children_wdl = getattr(_rust_engine, "solve_children_wdl", None)
-    solve_batch_children_wdl = getattr(_rust_engine, "solve_batch_children_wdl", None)
-    RUST_MCTS_AVAILABLE = RustConnectFour is not None and RustBatchedMCTS is not None
-    RUST_SOLVER_AVAILABLE = (
-        solve_batch_children_wdl is not None or solve_children_wdl is not None
-    )
-except ImportError:
-    _rust_engine = None
-    RustConnectFour = None
-    RustBatchedMCTS = None
-    solve_position_wdl = None
-    solve_children_wdl = None
-    solve_batch_children_wdl = None
-    RUST_MCTS_AVAILABLE = False
-    RUST_SOLVER_AVAILABLE = False
-
 DEFAULT_SOLVER_CACHE_DIR = Path("testdata/.solver_cache")
 _MEMORY_SOLVER_CACHE: dict[str, np.ndarray | None] = {}
 _MEMORY_MOVE_WDL_CACHE: dict[str, dict[str, np.ndarray]] = {}
@@ -310,12 +288,10 @@ def get_dataset_child_wdl(
        `0`: draw with best play
       `+1`: root mover wins with best play
 
-    Uses `alphafour_engine.solve_batch_children_wdl` when available and caches
-    results by SHA256 hash of the moves list in `testdata/.solver_cache/*.npz`
-    so subsequent calls (and `--limit` subsets) load in <5ms. Falls back to an
-    exact bounded-budget pure-Python bitboard solver for tactical / endgame
-    unit-test positions, returning `None` only when neither cache nor Rust
-    solver is available on deep early-game positions.
+    Loads SHA256-cached results from `testdata/.solver_cache/*.npz` (including
+    `--limit` subsets) in <5ms, or solves positions via the exact bounded-budget
+    Pascal-Pons bitboard negamax solver (`_bb_solve_wdl`), returning `None`
+    when uncached positions exceed the node budget.
     """
     moves_list, _ = _parse_dataset_lines(lines)
     n = len(moves_list)
@@ -326,7 +302,7 @@ def get_dataset_child_wdl(
     cache_key = hashlib.sha256(
         ("child_wdl_v1\n" + "\n".join(moves_list)).encode("utf-8")
     ).hexdigest()
-    mem_key = f"{cache_key}:rust={int(bool(RUST_SOLVER_AVAILABLE))}:b={python_max_nodes}"
+    mem_key = f"{cache_key}:b={python_max_nodes}"
     cache_file = cache_path / f"{cache_key}.npz"
 
     if use_cache:
@@ -351,62 +327,48 @@ def get_dataset_child_wdl(
             return subset_hit
 
     child_wdl: np.ndarray | None = None
-    solved_by_rust = False
-
-    if RUST_SOLVER_AVAILABLE and solve_batch_children_wdl is not None:
-        child_wdl = np.asarray(solve_batch_children_wdl(moves_list), dtype=np.int8)
-        solved_by_rust = True
-    elif RUST_SOLVER_AVAILABLE and solve_children_wdl is not None:
-        child_wdl = np.asarray(
-            [solve_children_wdl(m) for m in moves_list], dtype=np.int8
-        )
-        solved_by_rust = True
-    else:
-        rows = np.empty((n, COLS), dtype=np.int8)
-        total_budget_limit = max(python_max_nodes * 4, 250_000)
-        nodes_spent = 0
-        all_solved = True
-        for i, m in enumerate(moves_list):
-            rem = total_budget_limit - nodes_spent
-            if rem <= 0:
+    rows = np.empty((n, COLS), dtype=np.int8)
+    total_budget_limit = max(python_max_nodes * 4, 250_000)
+    nodes_spent = 0
+    all_solved = True
+    for i, m in enumerate(moves_list):
+        rem = total_budget_limit - nodes_spent
+        if rem <= 0:
+            all_solved = False
+            break
+        pos, mask, mc = _bb_from_moves(m)
+        # Early positions (<20 stones) that don't resolve tactically in <2k nodes fail fast unless cached
+        pos_cap = python_max_nodes if mc >= 20 else min(python_max_nodes, 2_000)
+        per_pos_budget = min(pos_cap, rem)
+        opp = pos ^ mask
+        row = np.full(COLS, -2, dtype=np.int8)
+        if not (_bb_has_won(opp) or mc >= ROWS * COLS):
+            tt: dict[int, int] = {}
+            budget = [per_pos_budget]
+            try:
+                for c in range(COLS):
+                    if mask & (1 << (c * 7 + 5)):
+                        continue
+                    stone = (mask + (1 << (c * 7))) & ~mask
+                    if _bb_has_won(pos | stone):
+                        row[c] = 1
+                    elif mc + 1 >= ROWS * COLS:
+                        row[c] = 0
+                    else:
+                        row[c] = -_bb_solve_wdl(
+                            opp, mask | stone, mc + 1, tt, budget
+                        )
+            except _SolverBudgetExceeded:
                 all_solved = False
                 break
-            pos, mask, mc = _bb_from_moves(m)
-            # Positions with <20 stones either resolve tactically in <2k nodes or need full Rust solver
-            pos_cap = python_max_nodes if mc >= 20 else min(python_max_nodes, 2_000)
-            per_pos_budget = min(pos_cap, rem)
-            opp = pos ^ mask
-            row = np.full(COLS, -2, dtype=np.int8)
-            if not (_bb_has_won(opp) or mc >= ROWS * COLS):
-                tt: dict[int, int] = {}
-                budget = [per_pos_budget]
-                try:
-                    for c in range(COLS):
-                        if mask & (1 << (c * 7 + 5)):
-                            continue
-                        stone = (mask + (1 << (c * 7))) & ~mask
-                        if _bb_has_won(pos | stone):
-                            row[c] = 1
-                        elif mc + 1 >= ROWS * COLS:
-                            row[c] = 0
-                        else:
-                            row[c] = -_bb_solve_wdl(
-                                opp, mask | stone, mc + 1, tt, budget
-                            )
-                except _SolverBudgetExceeded:
-                    all_solved = False
-                    break
-                nodes_spent += per_pos_budget - budget[0]
-            rows[i] = row
-        if all_solved:
-            child_wdl = rows
+            nodes_spent += per_pos_budget - budget[0]
+        rows[i] = row
+    if all_solved:
+        child_wdl = rows
 
     if use_cache:
         _MEMORY_SOLVER_CACHE[mem_key] = child_wdl
-        # Persist exact result to disk when solved by Rust or when a custom cache_dir is supplied
-        if child_wdl is not None and (
-            solved_by_rust or cache_path != DEFAULT_SOLVER_CACHE_DIR
-        ):
+        if child_wdl is not None:
             try:
                 _save_solver_cache_npz(cache_file, child_wdl, moves_list=moves_list)
                 dir_key = str(cache_path.resolve())
@@ -419,132 +381,16 @@ def get_dataset_child_wdl(
     return child_wdl
 
 
-# ── Batched MCTS Helpers (Rust + Python Fallback) ───────────────────────────
-
-
-def _rust_game_from_moves(moves_str: str) -> Any:
-    """Create a `RustConnectFour` from a 1-indexed move string."""
-    if hasattr(RustConnectFour, "from_moves"):
-        return RustConnectFour.from_moves(moves_str)
-    g = RustConnectFour()
-    for ch in moves_str:
-        if "1" <= ch <= "7":
-            g.make_move(ord(ch) - ord("1"))
-    return g
+# ── Batched MCTS Helpers ────────────────────────────────────────────────────
 
 
 def _python_game_from_moves(moves_str: str) -> ConnectFour:
-    """Create a Python `ConnectFour` from a 1-indexed move string."""
+    """Create a `ConnectFour` board from a 1-indexed move string."""
     g = ConnectFour()
     for ch in moves_str:
         if "1" <= ch <= "7":
             g.make_move(ord(ch) - ord("1"))
     return g
-
-
-def _run_rust_batched_mcts(
-    model: Any,
-    device: torch.device,
-    rust_games: list[Any],
-    num_simulations: int,
-    c_puct: float = 1.5,
-    c_fpu: float = 0.20,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run `RustBatchedMCTS` exclusively with `model`, returning `(visits, best_actions, best_values)`."""
-    n = len(rust_games)
-    if n == 0:
-        return (
-            np.zeros((0, COLS), dtype=np.float32),
-            np.zeros((0,), dtype=np.int64),
-            np.zeros((0,), dtype=np.float32),
-        )
-
-    try:
-        engine = RustBatchedMCTS(rust_games, num_simulations, c_puct, c_fpu)
-    except TypeError:
-        engine = RustBatchedMCTS(rust_games, num_simulations)
-
-    use_fast_packed = (
-        hasattr(model, "predict_packed")
-        and hasattr(engine, "get_root_states_u8")
-        and hasattr(engine, "collect_leaves_u8")
-        and hasattr(engine, "apply_evaluations_packed")
-    )
-
-    if use_fast_packed:
-        root_states_u8, root_valid = engine.get_root_states_u8()
-        if len(root_states_u8) > 0:
-            states_t = torch.from_numpy(root_states_u8).to(device, non_blocking=True)
-            valid_t = torch.from_numpy(root_valid).to(device, non_blocking=True)
-            packed_root = model.predict_packed(states_t, valid_t)
-            pols_np = np.ascontiguousarray(
-                packed_root[:, :COLS].cpu().numpy(), dtype=np.float32
-            )
-            engine.init_roots(pols_np)
-        else:
-            engine.init_roots(np.zeros((0, COLS), dtype=np.float32))
-
-        zero_leaf_steps = 0
-        max_zero_steps = max(8, num_simulations + 4)
-        while not engine.is_done():
-            leaf_states_u8, leaf_valid, count = engine.collect_leaves_u8()
-            if count > 0:
-                zero_leaf_steps = 0
-                states_t = torch.from_numpy(leaf_states_u8).to(
-                    device, non_blocking=True
-                )
-                valid_t = torch.from_numpy(leaf_valid).to(device, non_blocking=True)
-                packed_t = model.predict_packed(states_t, valid_t)
-                packed_np = np.ascontiguousarray(
-                    packed_t.cpu().numpy(), dtype=np.float32
-                )
-                engine.apply_evaluations_packed(packed_np)
-            else:
-                zero_leaf_steps += 1
-                if zero_leaf_steps > max_zero_steps:
-                    break
-    else:
-        root_states, root_valid = engine.get_root_states()
-        if len(root_states) > 0:
-            with torch.no_grad(), _autocast_ctx(device):
-                states_t = torch.from_numpy(root_states).to(device)
-                valid_t = torch.from_numpy(root_valid).to(device)
-                pols_t, _ = model.predict(states_t, valid_t)
-            pols_np = np.ascontiguousarray(
-                pols_t.float().cpu().numpy(), dtype=np.float32
-            )
-            engine.init_roots(pols_np)
-        else:
-            engine.init_roots(np.zeros((0, COLS), dtype=np.float32))
-
-        zero_leaf_steps = 0
-        max_zero_steps = max(8, num_simulations + 4)
-        while not engine.is_done():
-            leaf_states, leaf_valid, count = engine.collect_leaves()
-            if count > 0:
-                zero_leaf_steps = 0
-                with torch.no_grad(), _autocast_ctx(device):
-                    states_t = torch.from_numpy(leaf_states).to(device)
-                    valid_t = torch.from_numpy(leaf_valid).to(device)
-                    pols_t, vals_t = model.predict(states_t, valid_t)
-                pols_np = np.ascontiguousarray(
-                    pols_t.float().cpu().numpy(), dtype=np.float32
-                )
-                vals_np = np.ascontiguousarray(
-                    vals_t.float().cpu().numpy().reshape(-1), dtype=np.float32
-                )
-                engine.apply_evaluations(pols_np, vals_np)
-            else:
-                zero_leaf_steps += 1
-                if zero_leaf_steps > max_zero_steps:
-                    break
-
-    visit_counts, best_actions, best_values, _ = engine.get_results()
-    return (
-        np.asarray(visit_counts, dtype=np.float32),
-        np.asarray(best_actions, dtype=np.int64),
-        np.asarray(best_values, dtype=np.float32),
-    )
 
 
 def _run_python_batched_mcts(
@@ -710,14 +556,9 @@ def evaluate_opening_move(
     model.eval()
 
     if num_simulations > 0:
-        if RUST_MCTS_AVAILABLE and RustConnectFour is not None:
-            vc, best_actions, _ = _run_rust_batched_mcts(
-                model, device, [RustConnectFour()], num_simulations
-            )
-        else:
-            vc, best_actions, _ = _run_python_batched_mcts(
-                model, device, [ConnectFour()], num_simulations
-            )
+        vc, best_actions, _ = _run_python_batched_mcts(
+            model, device, [ConnectFour()], num_simulations
+        )
         counts = vc[0]
         best_move = int(best_actions[0])
         total = float(counts.sum())
@@ -794,16 +635,10 @@ def _predict_dataset_arrays(
             best_actions[start:end] = np.argmax(masked_pols, axis=1)
             pred_values[start:end] = vals_np
         else:
-            if RUST_MCTS_AVAILABLE and RustConnectFour is not None:
-                r_games = [_rust_game_from_moves(m) for m in chunk_moves]
-                _, chunk_actions, chunk_values = _run_rust_batched_mcts(
-                    model, device, r_games, num_simulations
-                )
-            else:
-                py_games = [_python_game_from_moves(m) for m in chunk_moves]
-                _, chunk_actions, chunk_values = _run_python_batched_mcts(
-                    model, device, py_games, num_simulations
-                )
+            py_games = [_python_game_from_moves(m) for m in chunk_moves]
+            _, chunk_actions, chunk_values = _run_python_batched_mcts(
+                model, device, py_games, num_simulations
+            )
             best_actions[start:end] = chunk_actions
             pred_values[start:end] = chunk_values
 
@@ -1145,21 +980,16 @@ def generate_paired_openings(
 def _select_arena_actions_for_partition(
     model: Any,
     device: torch.device,
-    partition_games: list[Any],
+    partition_games: list[ConnectFour],
     num_simulations: int,
-    use_rust: bool,
 ) -> np.ndarray:
     """Run MCTS search for `partition_games` using ONLY `model` and return `visit_counts[K, 7]`."""
     if not partition_games:
         return np.zeros((0, COLS), dtype=np.float32)
 
     if num_simulations <= 0:
-        if use_rust:
-            states_np = np.stack([g.encode() for g in partition_games])
-            valid_np = np.stack([g.get_valid_moves() for g in partition_games])
-        else:
-            states_np = np.stack([g.encode() for g in partition_games])
-            valid_np = np.stack([g.get_valid_moves() for g in partition_games])
+        states_np = np.stack([g.encode() for g in partition_games])
+        valid_np = np.stack([g.get_valid_moves() for g in partition_games])
         with torch.no_grad(), _autocast_ctx(device):
             states_t = torch.from_numpy(states_np).to(device)
             valid_t = torch.from_numpy(valid_np).to(device)
@@ -1167,11 +997,6 @@ def _select_arena_actions_for_partition(
         pols_np = pols_t.float().cpu().numpy()
         return np.where(valid_np, pols_np, 0.0).astype(np.float32)
 
-    if use_rust:
-        vc, _, _ = _run_rust_batched_mcts(
-            model, device, partition_games, num_simulations
-        )
-        return vc
     vc, _, _ = _run_python_batched_mcts(model, device, partition_games, num_simulations)
     return vc
 
@@ -1212,11 +1037,10 @@ def play_batched_arena(
 
     sims_m1 = num_simulations
     sims_m2 = num_simulations if num_simulations_m2 is None else num_simulations_m2
-    use_rust = RUST_MCTS_AVAILABLE and RustConnectFour is not None
 
     num_pairs = num_games // 2
     m1_is_p1: list[bool] = []
-    games: list[Any] = []
+    games: list[ConnectFour] = []
     move_counts: list[int] = []
 
     if paired_openings and num_pairs > 0:
@@ -1227,34 +1051,21 @@ def play_batched_arena(
         )
         # First num_pairs: model1 is P1; next num_pairs: model1 is P2 on the exact same openings
         for moves_str in pair_list:
-            g1 = (
-                _rust_game_from_moves(moves_str)
-                if use_rust
-                else _python_game_from_moves(moves_str)
-            )
-            games.append(g1)
+            games.append(_python_game_from_moves(moves_str))
             m1_is_p1.append(True)
             move_counts.append(0)
         for moves_str in pair_list:
-            g2 = (
-                _rust_game_from_moves(moves_str)
-                if use_rust
-                else _python_game_from_moves(moves_str)
-            )
-            games.append(g2)
+            games.append(_python_game_from_moves(moves_str))
             m1_is_p1.append(False)
             move_counts.append(0)
         if num_games % 2 == 1:
-            g_extra = RustConnectFour() if use_rust else ConnectFour()
-            games.append(g_extra)
+            games.append(ConnectFour())
             m1_is_p1.append(True)
             move_counts.append(0)
     else:
         first_half = (num_games + 1) // 2
         m1_is_p1 = [True] * first_half + [False] * (num_games - first_half)
-        games = [
-            RustConnectFour() if use_rust else ConnectFour() for _ in range(num_games)
-        ]
+        games = [ConnectFour() for _ in range(num_games)]
         move_counts = [0] * num_games
 
     rng = np.random.default_rng(seed)
@@ -1293,7 +1104,6 @@ def play_batched_arena(
                 device,
                 [games[i] for i in m1_turn_indices],
                 sims_m1,
-                use_rust=use_rust,
             )
             for pos_idx, game_idx in enumerate(m1_turn_indices):
                 visits_by_game[game_idx] = vc_m1[pos_idx]
@@ -1304,7 +1114,6 @@ def play_batched_arena(
                 device,
                 [games[i] for i in m2_turn_indices],
                 sims_m2,
-                use_rust=use_rust,
             )
             for pos_idx, game_idx in enumerate(m2_turn_indices):
                 visits_by_game[game_idx] = vc_m2[pos_idx]

@@ -12,14 +12,11 @@ wheels/
 # Checkpoints / training artifacts
 checkpoints/
 
-# Rust-generated files
-rust/target
-
 # Cython-generated & compiled extension artifacts
 *.so
 *.pyd
-src/cython_self_play.c
-src/cython_self_play.html
+src/self_play.c
+src/self_play.html
 
 # Local editor
 .vscode

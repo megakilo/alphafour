@@ -1,10 +1,10 @@
 # alphafour
 
-An AlphaZero-style AI for Connect Four trained entirely through self-play on a single GPU (or Apple Silicon MPS / CPU). Combines a Squeeze-and-Excitation ResNet with a 3-logit Win/Draw/Loss (WDL) value head and a Rayon-parallelized Rust MCTS-Solver engine (`alphafour_engine`).
+An AlphaZero-style AI for Connect Four trained entirely through self-play on a single GPU (or multi-GPU DDP / Apple Silicon MPS / CPU). Combines a Squeeze-and-Excitation ResNet with a 3-logit Win/Draw/Loss (WDL) value head and an OpenMP-parallelized **Cython Pure Python Mode** MCTS-Solver self-play engine (`src/self_play.py`).
 
 ## Documentation
 
-Comprehensive educational guides (teaching AlphaZero from first principles through MCTS-Solver, WDL value networks, self-play, training, inference, exact solver verification, and the Rust bitboard engine) are available in [`docs/`](docs/README.md):
+Comprehensive educational guides (teaching AlphaZero from first principles through MCTS-Solver, WDL value networks, self-play, training, inference, exact solver verification, and the Cython bitboard arena engine) are available in [`docs/`](docs/README.md):
 
 - **[Documentation Hub & Learning Path](docs/README.md)**
 - **[01. AlphaZero from First Principles](docs/01-alphazero-fundamentals.md)**
@@ -12,18 +12,19 @@ Comprehensive educational guides (teaching AlphaZero from first principles throu
 - **[03. Neural Network Architecture, WDL Value Head & Fast Inference](docs/03-neural-network-and-inference.md)**
 - **[04. Self-Play Data Generation, Replay Buffer & Training Pipeline](docs/04-self-play-and-training.md)**
 - **[05. Verification, Exact Solver Metrics & Paired-Opening Arena](docs/05-evaluation-and-arena.md)**
-- **[06. High-Performance Rust Engine (`alphafour_engine`) & Exact Bitboard Solver](docs/06-rust-engine-and-architecture.md)**
+- **[06. High-Performance Cython Engine (`src/self_play.py`) & Bitboard Solver](docs/06-cython-engine-and-architecture.md)**
 - **[07. Practical Guide, Hyperparameter Intuition & Reference](docs/07-practical-guide-and-reference.md)**
 
 ## Setup
 
-Requires Python 3.12+, a Rust toolchain (`cargo`), and [uv](https://docs.astral.sh/uv/):
+Requires Python 3.12+, a C compiler (GCC/Clang/MSVC), and [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync
+uv run python setup_cython.py build_ext --inplace
 ```
 
-`uv sync` compiles and installs the `alphafour_engine` PyO3 extension in release mode alongside the Python dependencies. A pure-Python fallback is also included for every MCTS, self-play, and tactical solver path.
+`setup_cython.py` compiles `src/self_play.py` (written in Cython Pure Python Mode) into a native `nogil` C + OpenMP extension in-place. Even if uncompiled, `src/self_play.py` remains 100% valid Pure Python and executes directly as an automatic fallback.
 
 ## Training
 
@@ -136,7 +137,7 @@ uv run benchmark.py --checkpoint checkpoints/checkpoint_0150.pt --arena-vs check
 ### Verification Metrics
 
 - **WDL Accuracy & Per-Class Win / Draw / Loss Recall**: Evaluates 3-class outcome classification against `sign(true_score) ∈ {-1, 0, +1}` using `argmax(wdl_probs)` for raw network predictions (`0` sims) and symmetric `±(1/3)` thresholds on undiluted best-child Q-values (`-best_child.q_value`) for MCTS search (`>0` sims).
-- **Move Optimality % & Blunder %**: Uses the exact 49-bit Pascal-Pons bitboard alpha-beta solver (`solve_batch_children_wdl`, cached by SHA256 in `testdata/.solver_cache/`) to compute exact W/D/L outcomes for all 7 child columns of every test position. A chosen move is **optimal** iff its child W/D/L matches the best legal move (`sign(true_score)`), and a **blunder** iff it strictly degrades the game-theoretic outcome on a non-already-lost position.
+- **Move Optimality % & Blunder %**: Uses the exact 49-bit Pascal-Pons bitboard solver (`get_dataset_child_wdl` in `src/evaluate.py`, cached by SHA256 in `testdata/.solver_cache/`) to evaluate exact W/D/L outcomes for all 7 child columns of every test position. A chosen move is **optimal** iff its child W/D/L matches the best legal move (`sign(true_score)`), and a **blunder** iff it strictly degrades the game-theoretic outcome on a non-already-lost position.
 - **Value MSE**: Mean squared error of predicted values in `[-1, +1]` against exact game-theoretic W/D/L targets `{-1.0, 0.0, +1.0}`.
 - **Model-Isolated Paired-Opening Arena & Anchor Elo**: Active Arena games are partitioned by root mover at every ply so each model evaluates 100% of its own MCTS search tree without cross-model leaf contamination. Balanced 2–4 ply tactical-filtered openings are played twice (swapping colors) with `temperature = 0.0`, alongside absolute Elo tracking against `PureMCTSBaseline`.
 
@@ -153,8 +154,8 @@ Input (3×6×7) ─► Conv 3×3 (128) + BN + ReLU ─► 10 × SE-ResBlock (128
                                                                                └─► V = P(Win) - P(Loss) ∈ [-1, +1]
 ```
 
-- **Rust Engine (`alphafour_engine`)**: Parallelized across CPU cores with Rayon (`RustBatchedSelfPlay`, `RustBatchedMCTS`, and exact bitboard solver), featuring barrier-free continuous self-play batching (`uint8` states + packed `float32[B, 8]` policy/value outputs), inline `Copy` MCTS arenas (`!needs_drop`), collision-aborted virtual-loss leaf batching, exact **MCTS-Solver** (`ProvenWin` / `ProvenLoss` / `ProvenDraw` propagation), **First Play Urgency (FPU)** reduction (`c_fpu = 0.20`), `dirichlet_alpha = 0.35`, stochastic 0–4 ply opening diversification, and normalized visit-count policy targets decoupled from move selection temperature (`TEMP_THRESHOLD = 10`).
-- **Single-GPU Training & Inference**: `channels_last` (`NHWC`) memory layout + dynamic `torch.compile` + `bfloat16` mixed precision on CUDA across self-play, evaluation, and training; preallocated `uint8` ring-buffer `ReplayBuffer` (`300K` states in ~47 MB) with O(B) analytical inverse-CDF 2:1 linear recency sampling; decoupled `AdamW` weight decay (excluding BatchNorm and bias parameters); horizontal board-mirroring data augmentation; and linear warmup + single-cycle cosine LR schedule.
+- **Cython Self-Play Engine (`src/self_play.py`)**: Written in Cython Pure Python Mode and parallelized across CPU cores with `nogil` + OpenMP `prange` (`CythonBatchedSelfPlay`), featuring barrier-free continuous self-play batching (`uint8` states + packed `float32[B, 8]` policy/value outputs), flat C-struct MCTS arenas with double-buffered subtree rebasing, collision-aborted virtual-loss leaf batching, exact **MCTS-Solver** (`SOLVER_WIN` / `SOLVER_LOSS` / `SOLVER_DRAW` propagation), **First Play Urgency (FPU)** reduction (`c_fpu = 0.20`), `dirichlet_alpha = 0.35`, stochastic 0–4 ply opening diversification, and normalized visit-count policy targets decoupled from move selection temperature (`TEMP_THRESHOLD = 10`).
+- **Single-GPU & Multi-GPU Training & Inference**: `channels_last` (`NHWC`) memory layout + dynamic `torch.compile` + `bfloat16` mixed precision on CUDA across self-play, evaluation, and training; preallocated `uint8` ring-buffer `ReplayBuffer` (`300K` states in ~47 MB) with O(B) analytical inverse-CDF 2:1 linear recency sampling; decoupled `AdamW` weight decay (excluding BatchNorm and bias parameters); horizontal board-mirroring data augmentation; and linear warmup + single-cycle cosine LR schedule.
 
 ## Project Structure
 
@@ -162,20 +163,20 @@ Input (3×6×7) ─► Conv 3×3 (128) + BN + ReLU ─► 10 × SE-ResBlock (128
 ├── main.py                  # Self-play training entry point
 ├── play.py                  # Interactive Human vs AI console game
 ├── benchmark.py             # Dataset & Arena verification CLI
+├── benchmark_selfplay.py    # Cython self-play engine throughput benchmark CLI
+├── setup_cython.py          # Build script for compiling src/self_play.py (.so)
 ├── docs/                    # AlphaZero educational guide & architecture docs
-├── rust/                    # PyO3 + Rayon Rust engine (alphafour_engine)
-│   └── src/                 # Bitboard game, MCTS-Solver, batched self-play & solver
 ├── src/
 │   ├── game.py              # Python Connect Four board & tensor encoding
 │   ├── model.py             # SE-ResNet with 32-ch policy & 16-ch 3-logit WDL value head
 │   ├── mcts.py              # Python MCTS-Solver, FPU reduction & stateful tree reuse
-│   ├── self_play.py         # Batched self-play orchestration
+│   ├── self_play.py         # Cython Pure Python Mode batched MCTS self-play engine
 │   ├── trainer.py           # Contiguous GPU ring buffer & BF16 WDL trainer
 │   ├── evaluate.py          # Solver-cached dataset metrics, isolated Arena & Anchor Elo
-│   ├── distributed.py       # Multi-GPU DDP runtime, sharding & collective sync
+│   ├── distributed.py       # Multi-GPU DDP runtime, OpenMP sharding & collective sync
 │   └── utils.py             # Device selection, checkpoint & replay-buffer I/O
 ├── testdata/                # gamesolver.org benchmark positions (Test_L*_R*)
-└── tests/                   # Rust & Python unit test suites
+└── tests/                   # Unit & integration test suites
 ```
 
 ## Test Data

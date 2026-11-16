@@ -21,13 +21,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Partition Rayon CPU threads before importing `alphafour_engine` under `torchrun`
+# Partition OpenMP CPU threads across DDP ranks under `torchrun`
 _env_ws = int(os.environ.get("WORLD_SIZE", "1"))
 if _env_ws > 1:
     os.environ.setdefault(
-        "RAYON_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // _env_ws))
+        "OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // _env_ws))
     )
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("TORCHINDUCTOR_ONLINE_SOFTMAX", "0")
 
 import numpy as np
@@ -41,7 +40,7 @@ from src.distributed import (
     barrier,
     broadcast_object,
     cleanup_distributed,
-    configure_rayon_threads,
+    configure_omp_threads,
     find_free_port,
     gather_self_play_arrays,
     get_comm_device,
@@ -58,7 +57,7 @@ from src.evaluate import (
     play_batched_arena_distributed,
 )
 from src.model import AlphaZeroNet
-from src.self_play import run_self_play
+from src.self_play import is_cython_compiled, run_self_play
 from src.trainer import ReplayBuffer, Trainer
 from src.utils import (
     get_device,
@@ -176,13 +175,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Number of CUDA GPUs for DDP training (default: auto-detect all visible GPUs; 1 = single-GPU)",
     )
-    parser.add_argument(
-        "--self-play-backend",
-        type=str,
-        choices=["auto", "rust", "cython", "python"],
-        default="auto",
-        help="Self-play MCTS engine backend (default: auto)",
-    )
 
     return parser.parse_args()
 
@@ -297,7 +289,7 @@ def _run_training(
     device: torch.device,
 ) -> None:
     is_main = rank == 0
-    rayon_threads = configure_rayon_threads(world_size)
+    omp_threads = configure_omp_threads(world_size)
     base_seed = int(broadcast_object(int(time.time()) if is_main else 0, src=0))
     seed_rank(base_seed, rank)
 
@@ -305,7 +297,7 @@ def _run_training(
         print("🎮 AlphaZero Connect Four Training")
         if world_size > 1:
             print(
-                f"   Device: {device} ({world_size} GPUs via DDP, Rayon={rayon_threads} threads/rank)"
+                f"   Device: {device} ({world_size} GPUs via DDP, OMP={omp_threads} threads/rank)"
             )
         else:
             print(f"   Device: {device}")
@@ -319,7 +311,9 @@ def _run_training(
             f"   Model: {args.res_blocks} res blocks, {args.filters} filters "
             f"(compile={args.compile})"
         )
-        print(f"   Self-play backend: {args.self_play_backend}")
+        print(
+            f"   Self-play engine: Cython ({'compiled C/OpenMP' if is_cython_compiled() else 'Pure Python fallback'})"
+        )
         print()
 
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -426,7 +420,6 @@ def _run_training(
         replay_buffer, "add_batch"
     )
     sp_supports_uint8 = "return_uint8" in sp_params
-    sp_supports_backend = "backend" in sp_params
 
     # Main training loop
     for iteration in range(start_iteration, args.iterations):
@@ -444,18 +437,15 @@ def _run_training(
             )
             print(
                 f"  🎲 Self-play: {args.games_per_iteration} games{shard_note}, "
-                f"{args.training_simulations} sims/move (backend={args.self_play_backend}) ..."
+                f"{args.training_simulations} sims/move ..."
             )
         model.eval()
 
         sp_start = time.time()
-        sp_backend_arg = getattr(args, "self_play_backend", "auto")
         if sp_supports_arrays:
             sp_kwargs: dict[str, Any] = {"return_arrays": True}
             if sp_supports_uint8:
                 sp_kwargs["return_uint8"] = True
-            if sp_supports_backend:
-                sp_kwargs["backend"] = sp_backend_arg
             states_arr, policies_arr, values_arr = run_self_play(
                 model=model,
                 num_games=local_games,
@@ -476,14 +466,10 @@ def _run_training(
                 replay_buffer.add_batch(states_arr, policies_arr, values_arr)
                 num_generated = len(states_arr)
         else:
-            legacy_sp_kwargs: dict[str, Any] = {}
-            if sp_supports_backend:
-                legacy_sp_kwargs["backend"] = sp_backend_arg
             examples = run_self_play(
                 model=model,
                 num_games=local_games,
                 num_simulations=args.training_simulations,
-                **legacy_sp_kwargs,
             )
             if world_size > 1:
                 if examples:
@@ -752,7 +738,7 @@ def _ddp_spawn_worker(
     args: argparse.Namespace,
 ) -> None:
     """Worker entrypoint for multi-GPU `torch.multiprocessing.spawn` DDP runs."""
-    configure_rayon_threads(world_size)
+    configure_omp_threads(world_size)
     device = init_distributed_process(
         rank=rank,
         world_size=world_size,
@@ -775,7 +761,7 @@ def main() -> None:
     if env_world_size > 1:
         rank = int(os.environ["RANK"])
         local_rank = int(os.environ.get("LOCAL_RANK", rank))
-        configure_rayon_threads(env_world_size)
+        configure_omp_threads(env_world_size)
         device = init_distributed_process(
             rank=rank,
             world_size=env_world_size,
@@ -798,7 +784,7 @@ def main() -> None:
 
     target_gpus = avail_gpus if (args.gpus is None or args.gpus <= 0) else args.gpus
     if target_gpus >= 2:
-        configure_rayon_threads(target_gpus)
+        configure_omp_threads(target_gpus)
         master_port = find_free_port()
         mp.spawn(
             _ddp_spawn_worker,

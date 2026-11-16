@@ -17,7 +17,7 @@ import main as main_cli
 from src.distributed import (
     barrier,
     cleanup_distributed,
-    configure_rayon_threads,
+    configure_omp_threads,
     find_free_port,
     gather_self_play_arrays,
     get_rank,
@@ -142,18 +142,18 @@ def test_shard_count_exact_partition() -> None:
             assert max(counts) - min(counts) <= 1
 
 
-def test_configure_rayon_threads_and_seed_rank(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`configure_rayon_threads` partitions cores and respects explicit env overrides."""
-    monkeypatch.delenv("RAYON_NUM_THREADS", raising=False)
+def test_configure_omp_threads_and_seed_rank(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`configure_omp_threads` partitions cores and respects explicit env overrides."""
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
     monkeypatch.setattr(os, "cpu_count", lambda: 16)
-    threads = configure_rayon_threads(2)
+    threads = configure_omp_threads(2)
     assert threads == 8
-    assert os.environ["RAYON_NUM_THREADS"] == "8"
+    assert os.environ["OMP_NUM_THREADS"] == "8"
 
     # Explicit user override should not be overwritten
-    monkeypatch.setenv("RAYON_NUM_THREADS", "4")
-    assert configure_rayon_threads(2) == 4
-    assert os.environ["RAYON_NUM_THREADS"] == "4"
+    monkeypatch.setenv("OMP_NUM_THREADS", "4")
+    assert configure_omp_threads(2) == 4
+    assert os.environ["OMP_NUM_THREADS"] == "4"
 
     seed_rank(1234, 0)
     r0_np = float(np.random.random())
@@ -236,7 +236,7 @@ def _gloo_e2e_worker(
     artifact_dir_str: str,
 ) -> None:
     """2-rank CPU/gloo DDP test verifying gather, Trainer sync, eval & arena exactness."""
-    os.environ["RAYON_NUM_THREADS"] = "2"
+    os.environ["OMP_NUM_THREADS"] = "2"
     artifact_dir = Path(artifact_dir_str)
     device = init_distributed_process(
         rank=rank,
@@ -473,7 +473,7 @@ def _nccl_cuda_worker(
     artifact_dir_str: str,
 ) -> None:
     """Lightweight 2-GPU NCCL + torch.compile DDP test (`AlphaZeroNet(2, 32)`)."""
-    os.environ["RAYON_NUM_THREADS"] = "4"
+    os.environ["OMP_NUM_THREADS"] = "4"
     artifact_dir = Path(artifact_dir_str)
     device = init_distributed_process(
         rank=rank,
